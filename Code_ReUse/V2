@@ -1,0 +1,11 @@
+| Feature                | Function                                            |
+| ---------------------- | --------------------------------------------------- |
+| 🔐 Custom Post Type    | `buytap_order` for storing trades                   |
+| 🛒 Form Handlers       | HTML & Elementor forms create orders                |
+| 🔄 Token Deduction     | Reduces token pool on purchase                      |
+| 🤝 Auto-Pairing        | Matches buyer with matured seller                   |
+| 👤 Seller Info Display | Visible under buyer’s order on “Pending Orders” tab |
+| ⏳ Countdown Timer      | Buyer has 1 hour to pay                             |
+| ✅ Payment Button       | Buyer confirms payment manually                     |
+| 🧾 Admin Meta Fields   | All fields editable via WP dashboard                |
+| 💰 Token Pool Admin    | Admin UI to set available tokens                    |
