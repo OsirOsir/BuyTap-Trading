@@ -1,3 +1,4 @@
+<?php
 //Testing  Seller Maturity  --To  be deleted Immidiately  after  use  
 add_action('init', function () {
     if (isset($_GET['create_matured_test_order']) && current_user_can('manage_options')) {
