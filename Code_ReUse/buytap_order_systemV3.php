@@ -511,3 +511,44 @@ function buytap_enqueue_script_and_nonce() {
     ]);
 }
 add_action('wp_enqueue_scripts', 'buytap_enqueue_script_and_nonce');
+
+
+//Create the Countdown Script (MM:SS Format) for the  buyer  to make  payment 
+add_action('wp_footer', function () {
+    ?>
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const countdownCells = document.querySelectorAll('[data-countdown]');
+        countdownCells.forEach(cell => {
+            const orderRow = cell.closest('tr');
+            const statusElement = orderRow.querySelector('.badge-paid, .made-payment-btn');
+
+            // If Payment already sent, just show "--"
+            if (statusElement && statusElement.classList.contains('badge-paid')) {
+                cell.textContent = '--';
+                return;
+            }
+
+            const endTime = parseInt(cell.dataset.countdown) * 1000;
+
+            function updateCountdown() {
+                const now = Date.now();
+                const diff = endTime - now;
+
+                if (diff <= 0) {
+                    cell.textContent = '00:00';
+                    return;
+                }
+
+                const minutes = Math.floor(diff / 60000);
+                const seconds = Math.floor((diff % 60000) / 1000);
+                cell.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                requestAnimationFrame(updateCountdown);
+            }
+
+            updateCountdown();
+        });
+    });
+    </script>
+    <?php
+});
