@@ -500,6 +500,8 @@ add_action('rest_api_init', function () {
     ]);
 });
 
+//// 🔁 Handle Buyer Payment Confirmation and Activate Order with Maturity Countdown
+
 function buytap_rest_mark_payment(WP_REST_Request $request) {
     $order_id = intval($request['order_id']);
     $user_id = get_current_user_id();
@@ -516,22 +518,26 @@ function buytap_rest_mark_payment(WP_REST_Request $request) {
     // ✅ Mark payment made
     update_post_meta($order_id, 'sub_status', 'Payment Made');
 
-    // ✅ Transition to Active status
+    // ✅ Get order duration in days (from text)
     $details = get_post_meta($order_id, 'order_details', true); // e.g. "Ksh. 500 for 4 days"
     preg_match('/for (\d+) days/', $details, $matches);
     $duration_days = isset($matches[1]) ? (int)$matches[1] : 4;
-    $now = current_time('timestamp');
-    $maturity_ts = $now + ($duration_days * 86400);
 
+    // ✅ Set clean timestamp and maturity
+    $now_ts = current_time('timestamp');            // Get now as UNIX timestamp (site timezone)
+    $now_ts = $now_ts - ($now_ts % 60);             // Optional: round down to nearest minute
+    $maturity_ts = $now_ts + ($duration_days * 86400); // Add days
+    $now_mysql = date('Y-m-d H:i:s', $now_ts);      // Convert to MySQL format
+
+    // ✅ Save updated status and countdown fields
     update_post_meta($order_id, 'status', 'Active');
-    update_post_meta($order_id, 'date_purchased', date('Y-m-d H:i:s', $now));
+    update_post_meta($order_id, 'date_purchased', $now_mysql);
     update_post_meta($order_id, 'expected_amount', get_post_meta($order_id, 'amount_to_make', true));
     update_post_meta($order_id, 'running_status', 'Running');
     update_post_meta($order_id, 'time_remaining', $maturity_ts);
 
     return new WP_REST_Response(['success' => true, 'message' => 'Payment marked and order activated'], 200);
 }
-
 
 function buytap_enqueue_script_and_nonce() {
     wp_register_script('buytap-front-js', false); // No actual JS file needed
@@ -664,14 +670,15 @@ add_action('wp_footer', function () {
     document.addEventListener('DOMContentLoaded', function () {
         const activeTimers = document.querySelectorAll('[data-active-countdown]');
         activeTimers.forEach(cell => {
-            const maturityTimestamp = parseInt(cell.dataset.activeCountdown) * 1000;
+            const maturityTimestamp = parseInt(cell.dataset.activeCountdown) * 1000; // convert to milliseconds
 
-            function updateCountdown() {
+            const timer = setInterval(() => {
                 const now = Date.now();
                 const diff = maturityTimestamp - now;
 
                 if (diff <= 0) {
                     cell.innerHTML = 'Matured';
+                    clearInterval(timer);
                     return;
                 }
 
@@ -681,10 +688,7 @@ add_action('wp_footer', function () {
                 const seconds = Math.floor((diff % (1000 * 60)) / 1000);
 
                 cell.innerHTML = `${days}d ${hours}h ${minutes}m ${seconds}s`;
-                requestAnimationFrame(updateCountdown);
-            }
-
-            updateCountdown();
+            }, 1000);
         });
     });
     </script>
