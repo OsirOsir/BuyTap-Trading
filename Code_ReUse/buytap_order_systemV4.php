@@ -513,10 +513,25 @@ function buytap_rest_mark_payment(WP_REST_Request $request) {
         return new WP_REST_Response(['success' => false, 'message' => 'Unauthorized'], 403);
     }
 
+    // ✅ Mark payment made
     update_post_meta($order_id, 'sub_status', 'Payment Made');
 
-    return new WP_REST_Response(['success' => true, 'message' => 'Payment marked'], 200);
+    // ✅ Transition to Active status
+    $details = get_post_meta($order_id, 'order_details', true); // e.g. "Ksh. 500 for 4 days"
+    preg_match('/for (\d+) days/', $details, $matches);
+    $duration_days = isset($matches[1]) ? (int)$matches[1] : 4;
+    $now = current_time('timestamp');
+    $maturity_ts = $now + ($duration_days * 86400);
+
+    update_post_meta($order_id, 'status', 'Active');
+    update_post_meta($order_id, 'date_purchased', date('Y-m-d H:i:s', $now));
+    update_post_meta($order_id, 'expected_amount', get_post_meta($order_id, 'amount_to_make', true));
+    update_post_meta($order_id, 'running_status', 'Running');
+    update_post_meta($order_id, 'time_remaining', $maturity_ts);
+
+    return new WP_REST_Response(['success' => true, 'message' => 'Payment marked and order activated'], 200);
 }
+
 
 function buytap_enqueue_script_and_nonce() {
     wp_register_script('buytap-front-js', false); // No actual JS file needed
