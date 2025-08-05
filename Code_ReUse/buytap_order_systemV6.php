@@ -609,17 +609,32 @@ add_shortcode('buytap_active_orders', function () {
                     <?php foreach ($orders as $order):
 						$id = $order->ID;
 						$date_purchased = esc_html(get_post_meta($id, 'date_purchased', true));
-						$amount_bought = esc_html(get_post_meta($id, 'amount_to_send', true));
-						$expected_return = esc_html(get_post_meta($id, 'expected_amount', true));
+						$amount_bought = (float) get_post_meta($id, 'amount_to_send', true);
+						$expected_return = (float) get_post_meta($id, 'expected_amount', true);
 						$time_remaining = (int)get_post_meta($id, 'time_remaining', true);
 
 						$status = get_post_meta($id, 'status', true);
 						$current_time = time();
 
 						// 👇 This will auto-convert from 'Active' to 'Matured'
+						$status = get_post_meta($id, 'status', true);
+						$current_time = time();
+
+						// If order matured
 						if ($status === 'Active' && $time_remaining <= $current_time) {
 							update_post_meta($id, 'status', 'Matured');
 							$status = 'Matured';
+
+							// ✅ Add expected amount back to pool if not already added
+							$already_returned = get_post_meta($id, 'returned_to_pool', true);
+							if ($already_returned !== 'yes') {
+								$expected = get_post_meta($id, 'expected_amount', true);
+								$expected = floatval($expected); // Ensure it's a number
+								$current_pool = get_option('buytap_token_pool', 0);
+								$new_pool = $current_pool + $expected;
+								update_option('buytap_token_pool', $new_pool);
+								update_post_meta($id, 'returned_to_pool', 'yes');
+							}
 						}
 						?>
 						<tr>
@@ -632,9 +647,9 @@ add_shortcode('buytap_active_orders', function () {
 							<td>
 								<?php
 							if ($status === 'Matured') {
-								echo '<span class="badge" style="background-color:orange;color:white;">Waiting to be Paired</span>';
+								echo '<span class="badge badge-waiting" style="background-color:orange;color:white;">Waiting to be Paired</span>';
 							} else {
-								echo '<span class="badge" style="background-color:green;color:white;">Running</span>';
+								echo '<span class="badge badge-running" style="background-color:green;color:white;">Running</span>';
 							}
 								?>
 							</td>
@@ -684,11 +699,7 @@ add_action('wp_footer', function () {
     <?php
 });
 
-// For  CSS File Styling 
-add_action('wp_enqueue_scripts', function () {
-    $plugin_url = plugin_dir_url(__FILE__);
-    wp_enqueue_style('buytap-order-style', $plugin_url . 'buytap-style.css', [], '1.0');
-});
+
 
 // ✅ Auto-detect matured orders and return tokens to pool
 add_action('wp_loaded', function () {
@@ -719,8 +730,9 @@ add_action('wp_loaded', function () {
 
         // ✅ Return expected amount to token pool
         $expected = (int) get_post_meta($order_id, 'expected_amount', true);
-        $current_pool = (int) get_option('buytap_token_pool', 0);
-        update_option('buytap_token_pool', $current_pool + $expected);
+        $current_pool = (int) get_option('buytap_total_tokens', 0);
+		update_option('buytap_total_tokens', $current_pool + $expected);
+
     }
 });
 
@@ -764,4 +776,3 @@ add_action('init', function () {
         exit;
     }
 });
-
