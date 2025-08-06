@@ -369,7 +369,7 @@ function buytap_pair_buyer_with_seller($order_id) {
         // Get seller data
         $seller_user_id = $seller->post_author;
         $seller_name = get_the_author_meta('display_name', $seller_user_id);
-        $seller_number = get_user_meta($seller_user_id, 'mpesa_number', true); // or use a custom field
+        $seller_number = get_user_meta($seller_user_id, 'mobile_number', true); // or use a custom field
 
         // Update buyer order
         update_post_meta($order_id, 'status', 'paired');
@@ -385,7 +385,7 @@ function buytap_pair_buyer_with_seller($order_id) {
 		// ✅ Save buyer info into seller order meta (for display under seller)
 		$buyer_user = get_userdata(get_post_field('post_author', $order_id));
 		$buyer_name = $buyer_user ? $buyer_user->display_name : '';
-		$buyer_number = get_user_meta($buyer_user->ID, 'mpesa_number', true);
+		$buyer_number = get_user_meta($buyer_user->ID, 'mobile_number', true);
 		$amount = get_post_meta($order_id, 'amount_to_send', true);
 
 		update_post_meta($seller_id, 'paired_buyer_name', $buyer_name);
@@ -772,7 +772,7 @@ function buytap_pair_matured_seller_with_buyer($seller_order_id) {
         // Copy seller info into buyer
         $seller_user = get_post_field('post_author', $seller_order_id);
         $seller_name = get_userdata($seller_user)->display_name;
-        $seller_number = get_user_meta($seller_user, 'mpesa_number', true);
+        $seller_number = get_user_meta($seller_user, 'mobile_number', true);
         $amount = get_post_meta($buyer_order_id, 'amount_to_send', true);
 
         update_post_meta($buyer_order_id, 'status', 'Paired');
@@ -805,7 +805,7 @@ add_action('init', function () {
         update_post_meta($order_id, 'amount_to_make', 500);
         update_post_meta($order_id, 'order_date', current_time('mysql'));
         update_post_meta($order_id, 'order_details', 'Test matured seller token');
-        update_user_meta($user_id, 'mpesa_number', '0712345678');
+        update_user_meta($user_id, 'mobile_number', '0712345678');
 
         echo "✅ Matured test order created. Order ID: $order_id";
         exit;
