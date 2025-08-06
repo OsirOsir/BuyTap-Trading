@@ -589,9 +589,9 @@ add_shortcode('buytap_active_orders', function () {
 							if ($already_returned !== 'yes') {
 								$expected = get_post_meta($id, 'expected_amount', true);
 								$expected = floatval($expected); // Ensure it's a number
-								$current_pool = get_option('buytap_token_pool', 0);
+								$current_pool = get_option('buytap_total_tokens', 0);
 								$new_pool = $current_pool + $expected;
-								update_option('buytap_token_pool', $new_pool);
+								update_option('buytap_total_tokens', $new_pool);
 								update_post_meta($id, 'returned_to_pool', 'yes');
 							}
 						}
@@ -712,23 +712,14 @@ add_action('wp_footer', function () {
     <?php
 });
 
-
-
-// ✅ Auto-detect matured orders and return tokens to pool
+//Add matured  Tokens back to the Pool (Expected Tokens) 
 add_action('wp_loaded', function () {
     $args = [
         'post_type' => 'buytap_order',
         'posts_per_page' => -1,
         'meta_query' => [
-            [
-                'key' => 'status',
-                'value' => 'Active'
-            ],
-            [
-                'key' => 'time_remaining',
-                'value' => current_time('timestamp'),
-                'compare' => '<='
-            ]
+            ['key' => 'status', 'value' => 'Active'],
+            ['key' => 'time_remaining', 'value' => current_time('timestamp'), 'compare' => '<=']
         ]
     ];
 
@@ -741,13 +732,28 @@ add_action('wp_loaded', function () {
         update_post_meta($order_id, 'status', 'Matured');
         update_post_meta($order_id, 'sub_status', 'Waiting to be Paired');
 
-        // ✅ Return expected amount to token pool
-        $expected = (int) get_post_meta($order_id, 'expected_amount', true);
-        $current_pool = (int) get_option('buytap_total_tokens', 0);
-		update_option('buytap_total_tokens', $current_pool + $expected);
+        // ✅ Only return tokens once
+        $already_returned = get_post_meta($order_id, 'returned_to_pool', true);
+        if ($already_returned !== 'yes') {
+            $expected = (int) get_post_meta($order_id, 'expected_amount', true);
+            $current_pool = (int) get_option('buytap_total_tokens', 0);
+            $new_pool = $current_pool + $expected;
 
+            if (update_option('buytap_total_tokens', $new_pool)) {
+                update_post_meta($order_id, 'returned_to_pool', 'yes');
+                error_log("✅ Order $order_id matured. Returned $expected to token pool.");
+            } else {
+                error_log("❌ Order $order_id failed to update pool.");
+            }
+        }
+
+        // ✅ Auto-pair matured seller with waiting buyer
+        if (function_exists('buytap_pair_matured_seller_with_buyer')) {
+            buytap_pair_matured_seller_with_buyer($order_id);
+        }
     }
 });
+
 
 // helper function for  pairing :
 function buytap_pair_matured_seller_with_buyer($seller_order_id) {
@@ -832,8 +838,8 @@ add_action('init', function () {
             $already_returned = get_post_meta($order_id, 'returned_to_pool', true);
             if ($already_returned !== 'yes') {
                 $expected = floatval(get_post_meta($order_id, 'expected_amount', true));
-                $current_pool = floatval(get_option('buytap_token_pool', 0));
-                update_option('buytap_token_pool', $current_pool + $expected);
+                $current_pool = floatval(get_option('buytap_total_tokens', 0));
+                update_option('buytap_total_tokens', $current_pool + $expected);
                 update_post_meta($order_id, 'returned_to_pool', 'yes');
             }
 
