@@ -826,18 +826,35 @@ add_action('init', function () {
     }
 });
 
-//Testing Forced Maturity
-// Force Maturity of Active Order (for testing only)
+// Testing Forced Maturity – Fully matures the order in DB
 // Usage: http://localhost/buytap/?expire_test_order=1&order_id=123
 add_action('init', function () {
     if (isset($_GET['expire_test_order']) && current_user_can('manage_options')) {
         $order_id = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
+
         if ($order_id && get_post_type($order_id) === 'buytap_order') {
-            update_post_meta($order_id, 'time_remaining', time() - 60); // 1 min ago
-            echo "⏳ Forced expiry for Order ID: $order_id";
+            $current_time = time();
+
+            // Force timer to expire
+            update_post_meta($order_id, 'time_remaining', $current_time - 60); // 1 min ago
+
+            // Update status directly
+            update_post_meta($order_id, 'status', 'Matured');
+
+            // Return tokens to pool if not already added
+            $already_returned = get_post_meta($order_id, 'returned_to_pool', true);
+            if ($already_returned !== 'yes') {
+                $expected = floatval(get_post_meta($order_id, 'expected_amount', true));
+                $current_pool = floatval(get_option('buytap_token_pool', 0));
+                update_option('buytap_token_pool', $current_pool + $expected);
+                update_post_meta($order_id, 'returned_to_pool', 'yes');
+            }
+
+            echo "✅ Order ID $order_id has been fully matured.";
         } else {
             echo "❌ Invalid or missing order ID.";
         }
+
         exit;
     }
 });
