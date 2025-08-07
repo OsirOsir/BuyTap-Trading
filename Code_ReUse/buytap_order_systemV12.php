@@ -405,19 +405,20 @@ add_action('init', function() {
         if ($user_id === (int)get_post_field('post_author', $order_id)) {
             // Mark as payment made
             update_post_meta($order_id, 'sub_status', 'Payment Made');
+			update_post_meta($order_id, 'buyer_confirmed', 'yes');
 
-            // Transition to ACTIVE immediately
-            $now = current_time('timestamp');
-            $details = get_post_meta($order_id, 'order_details', true); // e.g., "Ksh. 5700 for 4 days"
-            preg_match('/(?:for|in)?\s*(\d+)\s*day/i', $details, $matches);
-            $duration_days = isset($matches[1]) ? (int)$matches[1] : 4;
-            $maturity_ts = $now + ($duration_days * 86400);
+//             // Transition to ACTIVE immediately
+//             $now = current_time('timestamp');
+//             $details = get_post_meta($order_id, 'order_details', true); // e.g., "Ksh. 5700 for 4 days"
+//             preg_match('/(?:for|in)?\s*(\d+)\s*day/i', $details, $matches);
+//             $duration_days = isset($matches[1]) ? (int)$matches[1] : 4;
+//             $maturity_ts = $now + ($duration_days * 86400);
 
-            update_post_meta($order_id, 'status', 'Active');
-            update_post_meta($order_id, 'date_purchased', date('Y-m-d H:i:s', $now));
-            update_post_meta($order_id, 'expected_amount', get_post_meta($order_id, 'amount_to_make', true));
-            update_post_meta($order_id, 'running_status', 'Running');
-            update_post_meta($order_id, 'time_remaining', $maturity_ts);
+//             update_post_meta($order_id, 'status', 'Active');
+//             update_post_meta($order_id, 'date_purchased', date('Y-m-d H:i:s', $now));
+//             update_post_meta($order_id, 'expected_amount', get_post_meta($order_id, 'amount_to_make', true));
+//             update_post_meta($order_id, 'running_status', 'Running');
+//             update_post_meta($order_id, 'time_remaining', $maturity_ts);
         }
     }
 });
@@ -435,7 +436,6 @@ add_action('rest_api_init', function () {
 });
 
 //// 🔁 Handle Buyer Payment Confirmation and Activate Order with Maturity Countdown
-
 function buytap_rest_mark_payment(WP_REST_Request $request) {
     $order_id = intval($request['order_id']);
     $user_id = get_current_user_id();
@@ -451,20 +451,21 @@ function buytap_rest_mark_payment(WP_REST_Request $request) {
 
     // ✅ Mark payment made
     update_post_meta($order_id, 'sub_status', 'Payment Made');
+	update_post_meta($order_id, 'buyer_confirmed', 'yes');
 
-    // ✅ Get order duration in days (from text)
-    $details = get_post_meta($order_id, 'order_details', true); // e.g. "Ksh. 500 for 4 days"
-	preg_match('/(?:for|in)?\s*(\d+)\s*day/i', $details, $matches);
-	$duration_days = isset($matches[1]) ? (int)$matches[1] : 4;
+//     // ✅ Get order duration in days (from text)
+//     $details = get_post_meta($order_id, 'order_details', true); // e.g. "Ksh. 500 for 4 days"
+// 	preg_match('/(?:for|in)?\s*(\d+)\s*day/i', $details, $matches);
+// 	$duration_days = isset($matches[1]) ? (int)$matches[1] : 4;
 
-	$now_ts = time(); // ✅ exact timestamp (no timezone offset)
-	$maturity_ts = $now_ts + ($duration_days * 86400); // ✅ 4 days ahead
+// 	$now_ts = time(); // ✅ exact timestamp (no timezone offset)
+// 	$maturity_ts = $now_ts + ($duration_days * 86400); // ✅ 4 days ahead
 
-	update_post_meta($order_id, 'status', 'Active');
-	update_post_meta($order_id, 'date_purchased', current_time('mysql')); // keep this for records
-	update_post_meta($order_id, 'expected_amount', get_post_meta($order_id, 'amount_to_make', true));
-	update_post_meta($order_id, 'running_status', 'Running');
-	update_post_meta($order_id, 'time_remaining', $maturity_ts); // ✅ use this in countdown
+// 	update_post_meta($order_id, 'status', 'Active');
+// 	update_post_meta($order_id, 'date_purchased', current_time('mysql')); // keep this for records
+// 	update_post_meta($order_id, 'expected_amount', get_post_meta($order_id, 'amount_to_make', true));
+// 	update_post_meta($order_id, 'running_status', 'Running');
+// 	update_post_meta($order_id, 'time_remaining', $maturity_ts); // ✅ use this in countdown
 
 
     return new WP_REST_Response(['success' => true, 'message' => 'Payment marked and order activated'], 200);
@@ -677,15 +678,44 @@ add_action('wp_ajax_buytap_mark_received', function () {
     if ($post_author !== $current_user) {
         wp_send_json_error('You are not authorized');
     }
-
+	
+    // ✅ Mark confirmation and close immediately
     update_post_meta($order_id, 'seller_confirmed', 'yes');
     update_post_meta($order_id, 'payment_status', 'Payment Received');
+	update_post_meta($order_id, 'status', 'Closed'); // ← This ensures the Closed Orders tab will pick it up
 	
-//🔐 If buyer already confirmed, mark this order as Closed
-    if (get_post_meta($order_id, 'buyer_confirmed', true) === 'yes') {
-        update_post_meta($order_id, 'status', 'Closed');
-    }
+	//Now activate buyer's order (paired to this seller)
+// 🔄 Find the paired buyer order using paired_buyer_number
+    $paired_buyer_number = get_post_meta($order_id, 'paired_buyer_number', true);
+   if ($paired_buyer_number) {
+        $buyer_orders = get_posts([
+            'post_type' => 'buytap_order',
+            'posts_per_page' => 1,
+            'meta_query' => [
+                ['key' => 'mobile_number', 'value' => $paired_buyer_number],
+                ['key' => 'status', 'value' => 'Pending']
+            ]
+        ]);
 
+    if (!empty($buyer_orders)) {
+        $buyer_order = $buyer_orders[0];
+        $buyer_order_id = $buyer_order->ID;
+
+		// ✅ Start countdown and set as Active
+        // ✅ Transition to Active
+        $now = current_time('timestamp');
+        $details = get_post_meta($buyer_order_id, 'order_details', true); // e.g., "Ksh. 5700 for 4 days"
+        preg_match('/(?:for|in)?\s*(\d+)\s*day/i', $details, $matches);
+        $duration_days = isset($matches[1]) ? (int)$matches[1] : 4;
+        $maturity_ts = $now + ($duration_days * 86400);
+
+        update_post_meta($buyer_order_id, 'status', 'Active');
+        update_post_meta($buyer_order_id, 'date_purchased', date('Y-m-d H:i:s', $now));
+        update_post_meta($buyer_order_id, 'expected_amount', get_post_meta($buyer_order_id, 'amount_to_make', true));
+        update_post_meta($buyer_order_id, 'running_status', 'Running');
+        update_post_meta($buyer_order_id, 'time_remaining', $maturity_ts);
+    }
+   }
     wp_send_json_success('Marked as received');
 });
 
@@ -700,6 +730,7 @@ add_action('wp_footer', function () {
                 if (!confirm("Are you sure you've received the payment?")) return;
 
                 const orderId = this.dataset.orderId;
+                this.disabled = true; // Optional: disable button to prevent double clicks
 
                 fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
                     method: 'POST',
@@ -713,8 +744,10 @@ add_action('wp_footer', function () {
                 .then(data => {
                     if (data.success) {
                         this.outerHTML = '<span style="color:lightgreen;">✔ Payment Received</span>';
+                        setTimeout(() => location.reload(), 1000); // ✅ Auto-refresh
                     } else {
                         alert('❌ ' + data.data);
+                        this.disabled = false;
                     }
                 });
             });
@@ -724,52 +757,63 @@ add_action('wp_footer', function () {
     <?php
 });
 
-// 🛠️ Optional Fallback: Handle GET request to mark seller received (non-AJAX fallback or testing)
-//PHP Code for "Mark Received" Button Logic (No Form Needed) under  Active  Orders to SYNC BOTH ORDERS ON SELLER Confirmation
-add_action('init', function () {
-    if (isset($_GET['mark_received']) && is_user_logged_in()) {
-        $order_id = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
-        $current_user = get_current_user_id();
+// // 🛠️ Optional Fallback: Handle GET request to mark seller received (non-AJAX fallback or testing)
+// //PHP Code for "Mark Received" Button Logic (No Form Needed) under  Active  Orders to SYNC BOTH ORDERS ON SELLER Confirmation
+// add_action('init', function () {
+//     if (isset($_GET['mark_received']) && is_user_logged_in()) {
+//         $order_id = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
+//         $current_user = get_current_user_id();
 
-        if ($order_id && get_post_type($order_id) === 'buytap_order') {
-            // Match seller to current user
-            $seller_number = get_post_meta($order_id, 'seller_number', true);
-            $current_user_number = get_user_meta($current_user, 'mobile_number', true);
+//         if ($order_id && get_post_type($order_id) === 'buytap_order') {
+//             // Match seller to current user
+//             $seller_number = get_post_meta($order_id, 'seller_number', true);
+//             $current_user_number = get_user_meta($current_user, 'mobile_number', true);
 
-            if ($seller_number === $current_user_number) {
-                // ✅ Mark seller confirmation
-                update_post_meta($order_id, 'seller_confirmed', 'yes');
-                update_post_meta($order_id, 'payment_status', 'Payment Received');
+//             if ($seller_number === $current_user_number) {
+//                 // ✅ Mark seller confirmation and close their order
+//                 update_post_meta($order_id, 'seller_confirmed', 'yes');
+//                 update_post_meta($order_id, 'payment_status', 'Payment Received');
+//                 update_post_meta($order_id, 'status', 'Closed');
 
-                // ✅ If buyer already confirmed, mark BOTH orders as Closed
-                if (get_post_meta($order_id, 'buyer_confirmed', true) === 'yes') {
-                    update_post_meta($order_id, 'status', 'Closed');
+//                 // 🔍 Find paired buyer order
+//                 $paired_buyer_number = get_post_meta($order_id, 'paired_buyer_number', true);
 
-                    // 🔍 Find the buyer’s matching order and close it too
-                    $paired_buyer_number = get_post_meta($order_id, 'paired_buyer_number', true);
-                    $buyer_orders = get_posts([
-                        'post_type' => 'buytap_order',
-                        'posts_per_page' => -1,
-                        'meta_query' => [
-                            ['key' => 'mpesa_number', 'value' => $paired_buyer_number],
-                            ['key' => 'status', 'value' => 'Active']
-                        ]
-                    ]);
+//                 if ($paired_buyer_number) {
+//                     $buyer_orders = get_posts([
+//                         'post_type' => 'buytap_order',
+//                         'posts_per_page' => 1,
+//                         'meta_query' => [
+//                             ['key' => 'mobile_number', 'value' => $paired_buyer_number],
+//                             ['key' => 'status', 'value' => 'Pending']
+//                         ]
+//                     ]);
 
-                    foreach ($buyer_orders as $b_order) {
-                        update_post_meta($b_order->ID, 'status', 'Active');
-						update_post_meta($b_order->ID, 'buyer_confirmed', 'yes');
-                    }
-                }
+//                     if (!empty($buyer_orders)) {
+//                         $buyer_order = $buyer_orders[0];
+//                         $buyer_order_id = $buyer_order->ID;
 
-                wp_redirect(remove_query_arg(['mark_received', 'order_id']));
-                exit;
-            }
-        }
-    }
-});
+//                         // ✅ Transition to Active with countdown
+//                         $now = current_time('timestamp');
+//                         $details = get_post_meta($buyer_order_id, 'order_details', true);
+//                         preg_match('/(?:for|in)?\s*(\d+)\s*day/i', $details, $matches);
+//                         $duration_days = isset($matches[1]) ? (int)$matches[1] : 4;
+//                         $maturity_ts = $now + ($duration_days * 86400);
 
-
+//                         update_post_meta($buyer_order_id, 'status', 'Active');
+//                         update_post_meta($buyer_order_id, 'buyer_confirmed', 'yes');
+//                         update_post_meta($buyer_order_id, 'date_purchased', date('Y-m-d H:i:s', $now));
+//                         update_post_meta($buyer_order_id, 'expected_amount', get_post_meta($buyer_order_id, 'amount_to_make', true));
+//                         update_post_meta($buyer_order_id, 'running_status', 'Running');
+//                         update_post_meta($buyer_order_id, 'time_remaining', $maturity_ts);
+//                     }
+//                 }
+//                 // 🚀 Redirect back cleanly
+//                 wp_redirect(remove_query_arg(['mark_received', 'order_id']));
+//                 exit;
+//             }
+//         }
+//     }
+// });
 
 add_action('init', function () {
     if (
