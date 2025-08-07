@@ -154,3 +154,106 @@ function buytap_pair_buyer_with_seller($buyer_order_id) {
      ```
 
 This solution creates a direct relationship between paired orders and ensures proper state transitions. The countdown will appear in Active Orders as soon as the seller confirms receipt.
+
+
+
+
+
+
+
+STEPS 
+
+Awesome — you’re right on track. Here’s **exactly how to test** the buyer → Active transition after seller clicks **Mark as Received**:
+
+---
+
+## ✅ TESTING THE LOGIC: Step-by-Step
+
+### 🧪 Step 1: Create a Seller Order (Matured)
+
+You should already have this endpoint set up from testing:
+
+```
+http://localhost/buytap/?create_matured_test_order=1
+```
+
+> ✅ This creates a `buytap_order` with:
+
+* `status = Matured`
+* `is_paired = no`
+* current admin as author (seller)
+* with a valid `mobile_number`
+
+---
+
+### 🧑‍💻 Step 2: Log in as a Different User (Buyer)
+
+* **Create/browse with another user** (not the same one that created the seller test order).
+* Make sure the **buyer has a mobile number saved** in their profile:
+
+```php
+update_user_meta($user_id, 'mobile_number', '0712345678');
+```
+
+---
+
+### 🛒 Step 3: Place a Buyer Order
+
+Submit an Elementor form (or whatever you're using) that creates a **buytap\_order** for the buyer.
+
+This order will:
+
+* Be auto-paired with the seller (status = `paired`)
+* Populate seller’s info in the buyer's meta
+* Save buyer’s info into seller’s order (e.g. `paired_buyer_number`)
+
+---
+
+### 🔁 Step 4: Go to Active Orders (Seller Side)
+
+* Log in again as the **seller** (admin in this case).
+* Visit the Active Orders tab (shortcode: `[buytap_active_orders]`).
+* You should see the paired buyer’s details + the `Mark as Received` button.
+
+---
+
+### ✅ Step 5: Click “Mark as Received”
+
+* Click the button.
+* You should see:
+
+  * ✅ Seller order gets closed
+  * ✅ Buyer order status becomes **Active**
+  * ✅ Countdown starts (`time_remaining`)
+  * ✅ Buyer’s order now visible in `[buytap_active_orders]` tab
+
+---
+
+### 👀 Optional Debugging
+
+* Add `error_log()` lines in the AJAX to print:
+
+```php
+error_log("Buyer Order ID: $buyer_order_id");
+error_log("Maturity Timestamp: $maturity_ts");
+```
+
+Then check logs in `wp-content/debug.log`.
+
+---
+
+## 🧪 Summary Checklist
+
+| Step                       | What You’re Checking                     |
+| -------------------------- | ---------------------------------------- |
+| ✅ Seller created & matured | `status = Matured`, `is_paired = no`     |
+| ✅ Buyer created & paired   | `status = paired`, `seller_number saved` |
+| ✅ Seller sees buyer info   | Buyer data shown in Active tab           |
+| ✅ Seller clicks confirm    | AJAX triggers, buyer becomes Active      |
+| ✅ Buyer order countdown    | `time_remaining` countdown starts        |
+
+---
+
+If anything breaks, tell me where — I’ll help debug fast.
+
+Ready to walk through it live if needed?
