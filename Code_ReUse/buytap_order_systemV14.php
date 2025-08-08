@@ -812,62 +812,43 @@ add_action('wp_loaded', function () {
     }
 });
 
-// ✅ Helper function for reverse pairing (Seller → Buyer)
+
+// helper function for  pairing :
 function buytap_pair_matured_seller_with_buyer($seller_order_id) {
     $seller_status = get_post_meta($seller_order_id, 'status', true);
     $is_paired = get_post_meta($seller_order_id, 'is_paired', true);
 
     if ($seller_status !== 'Matured' || $is_paired !== 'no') return;
 
-    // 🔍 Find 1 unpaired pending buyer
+    // Find 1 pending buyer
     $buyers = get_posts([
         'post_type' => 'buytap_order',
         'post_status' => 'publish',
         'meta_query' => [
             ['key' => 'status', 'value' => 'Pending'],
-            ['key' => 'is_paired', 'compare' => 'NOT EXISTS'],
         ],
-        'numberposts' => 1,
-        'orderby' => 'date',
-        'order' => 'ASC',
+        'numberposts' => 1
     ]);
 
     if ($buyers) {
         $buyer_order_id = $buyers[0]->ID;
 
-        // 🔁 Link both ways
-        update_post_meta($buyer_order_id, 'paired_seller_order_id', $seller_order_id);
-        update_post_meta($seller_order_id, 'paired_buyer_order_id', $buyer_order_id);
-
-        // 🧍 Seller info into buyer
-        $seller_user_id = get_post_field('post_author', $seller_order_id);
-        $seller_name = get_userdata($seller_user_id)->display_name;
-        $seller_number = get_user_meta($seller_user_id, 'mobile_number', true);
+        // Copy seller info into buyer
+        $seller_user = get_post_field('post_author', $seller_order_id);
+        $seller_name = get_userdata($seller_user)->display_name;
+        $seller_number = get_user_meta($seller_user, 'mobile_number', true);
         $amount = get_post_meta($buyer_order_id, 'amount_to_send', true);
 
-        update_post_meta($buyer_order_id, 'status', 'paired');
+        update_post_meta($buyer_order_id, 'status', 'Paired');
         update_post_meta($buyer_order_id, 'seller_name', $seller_name);
         update_post_meta($buyer_order_id, 'seller_number', $seller_number);
-        update_post_meta($buyer_order_id, 'pair_time', current_time('timestamp'));
-        update_post_meta($buyer_order_id, 'sub_status', 'Waiting for Payment');
-        update_post_meta($buyer_order_id, 'is_paired', 'yes');
+        update_post_meta($buyer_order_id, 'amount_to_send', $amount);
+        update_post_meta($buyer_order_id, 'sub_status', 'Awaiting Payment');
 
-        // 🧍 Buyer info into seller
-        $buyer_user_id = get_post_field('post_author', $buyer_order_id);
-        $buyer_name = get_userdata($buyer_user_id)->display_name;
-        $buyer_number = get_user_meta($buyer_user_id, 'mobile_number', true);
-
-        update_post_meta($seller_order_id, 'paired_buyer_name', $buyer_name);
-        update_post_meta($seller_order_id, 'paired_buyer_number', $buyer_number);
-        update_post_meta($seller_order_id, 'amount_to_receive', $amount);
-        update_post_meta($seller_order_id, 'payment_status', 'Payment Pending');
+        // Mark seller as paired
         update_post_meta($seller_order_id, 'is_paired', 'yes');
-
-        // Optional: Log for testing
-        error_log("✅ Seller Order #$seller_order_id paired with Buyer Order #$buyer_order_id");
     }
 }
-
 
 // Shortcode  for Rendering  the  contents  under  Closed Orders Tab 
 add_shortcode('buytap_closed_orders', function () {
@@ -924,4 +905,29 @@ add_shortcode('buytap_closed_orders', function () {
     </div>
     <?php
     return ob_get_clean();
+});
+
+//Testing  Seller Maturity  --To  be deleted Immidiately  after  use  
+//http://localhost/buytap/?create_matured_test_order=1
+add_action('init', function () {
+    if (isset($_GET['create_matured_test_order']) && current_user_can('manage_options')) {
+        $user_id = get_current_user_id();
+
+        $order_id = wp_insert_post([
+            'post_type' => 'buytap_order',
+            'post_status' => 'publish',
+            'post_title' => "Matured Seller Test Order",
+            'post_author' => $user_id
+        ]);
+
+        update_post_meta($order_id, 'status', 'Matured');
+        update_post_meta($order_id, 'is_paired', 'no');
+        update_post_meta($order_id, 'amount_to_make', 500);
+        update_post_meta($order_id, 'order_date', current_time('mysql'));
+        update_post_meta($order_id, 'order_details', 'Test matured seller token');
+        update_user_meta($user_id, 'mobile_number', '0712345678');
+
+        echo "✅ Matured test order created. Order ID: $order_id";
+        exit;
+    }
 });
