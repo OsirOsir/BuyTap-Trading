@@ -6,7 +6,6 @@ Version: 1.0
 Author: Philip Osir
 */
 
-
 // =============================================
 // CUSTOM POST TYPE SETUP - ORDER MANAGEMENT
 // =============================================
@@ -893,48 +892,48 @@ add_action('wp_loaded', function () {
         }
     }
 });
-
 // =============================================
-// ORDER PAIRING SYSTEM - CORE LOGIC
+// IMPROVED ORDER PAIRING LOGIC
 // =============================================
 
 /**
- * Main pairing function - handles all order pairing logic
- * @param int $order_id The order ID to process
+ * Modified pairing logic to ensure full allocation
+ * (Replace existing buytap_pair_orders function)
  */
 function buytap_pair_orders($order_id) {
     $status = get_post_meta($order_id, 'status', true);
     
-    // Handle pending orders (buyers)
+    // Skip if order is already closed/revoked
+    if (!in_array($status, ['Pending', 'Matured', 'paired'])) {
+        return;
+    }
+
+    // Initialize remaining amounts
     if ($status === 'Pending') {
-        $amount = (float) get_post_meta($order_id, 'amount_to_send', true);
         $remaining = (float) get_post_meta($order_id, 'remaining_to_send', true);
-        
         if (empty($remaining)) {
-            update_post_meta($order_id, 'remaining_to_send', $amount);
-            $remaining = $amount;
+            $remaining = (float) get_post_meta($order_id, 'amount_to_send', true);
+            update_post_meta($order_id, 'remaining_to_send', $remaining);
         }
     } 
-    // Handle matured orders (sellers)
     elseif ($status === 'Matured') {
-        $amount = (float) get_post_meta($order_id, 'amount_to_make', true);
         $remaining = (float) get_post_meta($order_id, 'remaining_to_receive', true);
-        
         if (empty($remaining)) {
-            update_post_meta($order_id, 'remaining_to_receive', $amount);
-            $remaining = $amount;
+            $remaining = (float) get_post_meta($order_id, 'amount_to_make', true);
+            update_post_meta($order_id, 'remaining_to_receive', $remaining);
         }
     }
     else {
-        return;
+        // Handle partially-paired orders
+        $remaining = ($status === 'paired') 
+            ? (float) get_post_meta($order_id, 'remaining_to_send', true)
+            : 0;
     }
 
-    if ($remaining <= 0) {
-        return;
-    }
+    if ($remaining <= 0) return;
 
     // Find matching orders (buyers look for sellers and vice versa)
-    $is_buyer = ($status === 'Pending');
+    $is_buyer = in_array($status, ['Pending', 'paired']);
     $pair_args = [
         'post_type' => 'buytap_order',
         'posts_per_page' => -1,
@@ -955,7 +954,6 @@ function buytap_pair_orders($order_id) {
 
     $matches = get_posts($pair_args);
 
-    // Attempt to pair with each matching order
     foreach ($matches as $match) {
         $match_id = $match->ID;
         $match_remaining = (float) get_post_meta(
@@ -964,6 +962,11 @@ function buytap_pair_orders($order_id) {
             true
         );
         
+        $chunk_amount = min($remaining, $match_remaining);
+        
+        if ($chunk_amount < 1) continue;
+
+        // Perform pairing
         $result = buytap_perform_pairing(
             $is_buyer ? $order_id : $match_id,
             $is_buyer ? $match_id : $order_id,
@@ -971,14 +974,18 @@ function buytap_pair_orders($order_id) {
         );
         
         if ($result) {
+            // Update local remaining amount
             $remaining = $is_buyer 
                 ? (float) get_post_meta($order_id, 'remaining_to_send', true)
                 : (float) get_post_meta($order_id, 'remaining_to_receive', true);
                 
-            if ($remaining <= 0) {
-                break;
-            }
+            if ($remaining <= 0) break;
         }
+    }
+
+    // Update status to 'paired' only if partially matched
+    if ($status === 'Pending' && buytap_buyer_allocated_amount($order_id) > 0) {
+        update_post_meta($order_id, 'status', 'paired');
     }
 }
 
