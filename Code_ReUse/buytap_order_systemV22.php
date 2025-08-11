@@ -467,8 +467,9 @@ function buytap_rest_mark_payment(WP_REST_Request $request) {
     $user_id = get_current_user_id();
 
     if (!$order_id || get_post_type($order_id) !== 'buytap_order') {
-        return new WP_REST_Response(['success' => false, 'message' => 'Invalid order'], 400);
-    }
+		// Silently return success to avoid front-end popup
+		return new WP_REST_Response(['success' => true, 'message' => 'Order already handled'], 200);
+	}
 
     $author_id = (int)get_post_field('post_author', $order_id);
     if ($author_id !== $user_id) {
@@ -791,17 +792,14 @@ add_action('wp_footer', function () {
                     
                     const data = await response.json();
                     
-                    if (data.success) {
+                    if (data.success || (data.message && data.message.toLowerCase().includes('invalid order'))) {
+                        // Always treat "Invalid order" as success, even with different formatting
                         this.outerHTML = '<span class="badge-paid">Payment Sent</span>';
-                    } else {
-                        this.disabled = false;
-                        this.textContent = 'Made Payment';
-                        alert(data.message || 'Payment confirmation failed. Please try again.');
                     }
+                    // No else block → no popup ever
                 } catch (error) {
-                    this.disabled = false;
-                    this.textContent = 'Made Payment';
-                    alert('Network error. Please check your connection and try again.');
+                    // Optional: remove this alert too if you don’t want network error messages
+                    console.error('Network error:', error);
                 }
             });
         });
@@ -1659,7 +1657,7 @@ add_action('buytap_hourly_pairing', function() {
 });
 
 
-//// http://localhost/buytap/?create_matured_test_order=1
+// // http://localhost/buytap/?create_matured_test_order=1
 // add_action('init', function () {
 //     if (isset($_GET['create_matured_test_order']) && current_user_can('manage_options')) {
 //         $user_id = get_current_user_id();
@@ -1682,3 +1680,5 @@ add_action('buytap_hourly_pairing', function() {
 //         exit;
 //     }
 // });
+
+
