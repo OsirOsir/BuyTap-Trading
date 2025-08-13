@@ -728,6 +728,10 @@ add_action('wp_ajax_buytap_chunk_mark_received', function () {
     $buyer_order_id = (int) $chunk->buyer_order_id;
     buytap_activate_buyer_if_complete($buyer_order_id);
 
+	// ✅ Force status to Active if all chunks are received
+	if (buytap_buyer_all_chunks_received($buyer_order_id)) {
+		update_post_meta($buyer_order_id, 'status', 'Active');
+	}
     buytap_close_seller_if_funded($seller_order_id);
 
     wp_send_json_success('Marked as received');
@@ -1550,10 +1554,14 @@ function buytap_activate_buyer_if_complete($buyer_order_id) {
     }
 
     $status = get_post_meta($buyer_order_id, 'status', true);
-    if ($status === 'Active') {
-        return; // Already active
-    }
+	if ($status === 'Active') {
+		return; // Already active
+	}
 
+	// ✅ If status is "Matured" but all chunks are paid, reset it to Active
+	if ($status === 'Matured' && buytap_buyer_all_chunks_received($buyer_order_id)) {
+		// fall through and activate below
+	}
     // Calculate maturity timestamp
     $now = time();
     $duration_days = buytap_parse_duration_days($buyer_order_id);
