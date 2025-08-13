@@ -266,6 +266,7 @@ add_shortcode('my_referral_bonus_history', function() {
 
     ob_start();
     ?>
+	<div class="buytap-bonus-table">
     <table style="width:100%; border-collapse: collapse;">
         <thead>
             <tr>
@@ -288,6 +289,7 @@ add_shortcode('my_referral_bonus_history', function() {
             <?php endforeach; ?>
         </tbody>
     </table>
+	</div>
     <?php
     return ob_get_clean();
 });
