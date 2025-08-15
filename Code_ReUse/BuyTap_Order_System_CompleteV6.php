@@ -183,6 +183,8 @@ add_action('elementor_pro/forms/new_record', function($record, $handler) {
     update_post_meta($order_id, 'order_details', $amount . ' for ' . $duration);
     update_post_meta($order_id, 'status', 'Pending');
     update_post_meta($order_id, 'amount_to_make', $expected_return);
+	update_post_meta($order_id, 'expected_amount', $expected_return);
+	update_post_meta($order_id, 'remaining_to_receive', $expected_return); // Keep in sync
     update_post_meta($order_id, 'seller_name', '');
     update_post_meta($order_id, 'seller_number', '');
     update_post_meta($order_id, 'amount_to_send', $amount);
@@ -204,7 +206,7 @@ if ($promo_code) {
 
     if (!empty($upline_user)) {
         $upline_id = $upline_user[0];
-        $bonus = $amount * 0.03; // 3% commission
+        $bonus = $amount * 0.03; // 3% commission  THIS  IS WHERE I  CAN CHANGE THE COMMISION
 
         $upline_orders = get_posts([
             'post_type'      => 'buytap_order',
@@ -223,8 +225,13 @@ if ($promo_code) {
 
         if (!empty($upline_orders)) {
             $upline_order_id = $upline_orders[0]->ID;
+			
             $current_expected = (float) get_post_meta($upline_order_id, 'expected_amount', true);
             update_post_meta($upline_order_id, 'expected_amount', $current_expected + $bonus);
+
+			// ✅ Also update remaining_to_receive so pairing engine sees the bonus
+			$current_remaining = (float) get_post_meta($upline_order_id, 'remaining_to_receive', true);
+			update_post_meta($upline_order_id, 'remaining_to_receive', $current_remaining + $bonus);
 
             // ✅ Log referral bonus history
             $bonus_history = get_user_meta($upline_id, 'referral_bonus_history', true);
@@ -1765,4 +1772,3 @@ add_action('buytap_hourly_pairing', function() {
         buytap_pair_orders($order->ID);
     }
 });
-
