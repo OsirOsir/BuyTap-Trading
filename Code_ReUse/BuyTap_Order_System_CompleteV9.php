@@ -770,39 +770,46 @@ add_action('wp_footer', function () {
     document.addEventListener('DOMContentLoaded', function () {
         const countdownCells = document.querySelectorAll('[data-countdown]');
         countdownCells.forEach(cell => {
-            const raw = parseInt(cell.dataset.countdown, 10);
-            if (!raw) {
+            const orderRow = cell.closest('tr');
+            const statusElement = orderRow?.querySelector('.badge-paid, .made-payment-btn');
+
+            // If payment already marked, skip countdown
+            if (statusElement && statusElement.classList.contains('badge-paid')) {
                 cell.textContent = '--';
                 return;
             }
 
-            
-            const endTime = raw * 1000;
+            const raw = parseInt(cell.dataset.countdown, 10); // expiry in UTC seconds
+            if (!raw) { 
+                cell.textContent = '--'; 
+                return; 
+            }
+
+            const endTime = raw * 1000; // convert to ms
 
             function updateCountdown() {
-                const now = Date.now();
-                const diff = endTime - now;
+                const now = Date.now();      // UTC ms
+                const diff = endTime - now;  // ms
 
                 if (diff <= 0) {
                     cell.textContent = '00:00';
-                    clearInterval(timer);
                     return;
                 }
 
                 const minutes = Math.floor(diff / 60000);
                 const seconds = Math.floor((diff % 60000) / 1000);
                 cell.textContent = 
-                    `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                    `${String(minutes).padStart(2,'0')}:${String(seconds).padStart(2,'0')}`;
+
+                requestAnimationFrame(updateCountdown);
             }
 
-            updateCountdown(); // initial render
-            const timer = setInterval(updateCountdown, 1000);
+            updateCountdown();
         });
     });
     </script>
     <?php
 });
-
 
 // =============================================
 // ACTIVE ORDERS MANAGEMENT
@@ -855,7 +862,7 @@ add_shortcode('buytap_active_orders', function () {
                         $time_remaining = (int)get_post_meta($id, 'time_remaining', true);
 
                         $status = get_post_meta($id, 'status', true);
-                        $current_time = time();
+                        $current_time = current_time('timestamp', true);
 
                         // Check if order has matured
                         if ($status === 'Active' && $time_remaining <= $current_time) {
@@ -1155,7 +1162,7 @@ add_action('wp_loaded', function () {
         'posts_per_page' => -1,
         'meta_query' => [
             ['key' => 'status', 'value' => 'Active'],
-            ['key' => 'time_remaining', 'value' => current_time('timestamp'), 'compare' => '<=']
+            ['key' => 'time_remaining', 'value' => current_time('timestamp', true), 'compare' => '<=']
         ]
     ];
 
