@@ -178,7 +178,7 @@ add_action('elementor_pro/forms/new_record', function($record, $handler) {
         $profit_percent = 95;
     }
 
-    // Calculate expected return amount
+    // Calculate expected return amount (without bonus)
     $expected_return = $amount + ($amount * $profit_percent / 100);
 
     // Create order post 
@@ -189,13 +189,13 @@ add_action('elementor_pro/forms/new_record', function($record, $handler) {
         'post_author' => get_current_user_id(),
     ]);
 
-    // Save order metadata
+    // Save order metadata (without bonus)
     update_post_meta($order_id, 'order_date', current_time('Y-m-d H:i'));
     update_post_meta($order_id, 'order_details', $amount . ' for ' . $duration);
     update_post_meta($order_id, 'status', 'Pending');
     update_post_meta($order_id, 'amount_to_make', $expected_return);
     update_post_meta($order_id, 'expected_amount', $expected_return);
-    update_post_meta($order_id, 'remaining_to_receive', $expected_return); // Keep in sync
+    update_post_meta($order_id, 'remaining_to_receive', $expected_return);
     update_post_meta($order_id, 'seller_name', '');
     update_post_meta($order_id, 'seller_number', '');
     update_post_meta($order_id, 'amount_to_send', $amount);
@@ -203,7 +203,7 @@ add_action('elementor_pro/forms/new_record', function($record, $handler) {
     update_post_meta($order_id, 'remaining_to_send', $amount);
     update_post_meta($order_id, 'is_paired', 'no');
     
-    // --- REFERRAL BONUS LOGIC ---
+    // --- REFERRAL BONUS LOGIC (CREDIT UPLINE) ---
     $buyer_id = get_current_user_id();
     $promo_code = get_user_meta($buyer_id, 'promo_code', true);
 
@@ -219,22 +219,24 @@ add_action('elementor_pro/forms/new_record', function($record, $handler) {
             $upline_id = $upline_user[0];
             $bonus = round($amount * 0.03, 2); // 3% bonus
 
-            // Add to upline's bonus history (using your existing structure)
+            // Add to upline's bonus history as pending
             $bonus_history = get_user_meta($upline_id, 'referral_bonus_history', true) ?: [];
             
             $bonus_history[] = [
                 'date' => current_time('mysql'),
                 'buyer_id' => $buyer_id,
                 'buyer_name' => get_userdata($buyer_id)->display_name,
-                'order_id' => $order_id, // Downline's order ID
+                'order_id' => $order_id,
                 'purchase_amt' => $amount,
                 'bonus_amt' => $bonus,
-                'status' => 'pending' // Will change to 'applied' when used
+                'status' => 'pending',
+                'applied_to_order' => 0 // Will be set when upline uses it
             ];
             
             update_user_meta($upline_id, 'referral_bonus_history', $bonus_history);
         }
     }
+    
     // Deduct tokens from pool
     buytap_reduce_tokens_on_purchase((int)$amount);
     
@@ -333,15 +335,11 @@ add_action('save_post_buytap_order', function($post_id, $post, $update) {
         // Update bonus history
         update_user_meta($user_id, 'referral_bonus_history', $bonus_history);
         
-        // PROPERLY Add bonus to order - THIS IS THE KEY FIX
-        $current_expected = (float) get_post_meta($post_id, 'expected_amount', true);
-        $current_remaining = (float) get_post_meta($post_id, 'remaining_to_receive', true);
-        
-        // Get base amount to calculate proper expected return
+        // Get current order details
         $base_amount = (float) get_post_meta($post_id, 'amount_to_send', true);
         $order_details = get_post_meta($post_id, 'order_details', true);
         
-        // Calculate expected return based on duration
+        // Calculate base expected return (without bonus)
         if (strpos($order_details, '30% in 4 Days') !== false) {
             $expected_without_bonus = $base_amount * 1.30;
         } elseif (strpos($order_details, '65% in 8 Days') !== false) {
@@ -352,74 +350,16 @@ add_action('save_post_buytap_order', function($post_id, $post, $update) {
             $expected_without_bonus = $base_amount * 1.30; // Default fallback
         }
         
-        // Set new expected amount (base expected + bonus)
+        // Calculate new expected amount (with bonus)
         $new_expected = $expected_without_bonus + $total_bonus;
         
+        // Update order meta
         update_post_meta($post_id, 'expected_amount', $new_expected);
         update_post_meta($post_id, 'remaining_to_receive', $new_expected);
         update_post_meta($post_id, 'applied_referral_bonus', $total_bonus);
-		update_post_meta($post_id, 'amount_to_make', $new_expected);
+        update_post_meta($post_id, 'amount_to_make', $new_expected); // Keep this in sync
     }
 }, 10, 3);
-
-
-//Buytap_apply_referral_bonus function to ensure it properly updates both the expected amount and verifies the update:
-function buytap_apply_referral_bonus($user_id, $bonus_amount) {
-    // Get the most recent ACTIVE order (not just Pending)
-    $active_order = get_posts([
-        'post_type' => 'buytap_order',
-        'author' => $user_id,
-        'posts_per_page' => 1,
-        'meta_query' => [
-            [
-                'key' => 'status',
-                'value' => 'Active', // Only target Active orders
-                'compare' => '='
-            ]
-        ],
-        'orderby' => 'date',
-        'order' => 'DESC'
-    ]);
-
-    if (!empty($active_order)) {
-        $order_id = $active_order[0]->ID;
-        
-        // Get current values as floats
-        $current_expected = (float)get_post_meta($order_id, 'expected_amount', true);
-        $current_remaining = (float)get_post_meta($order_id, 'remaining_to_receive', true);
-        
-        // Calculate new values
-        $new_expected = $current_expected + $bonus_amount;
-        $new_remaining = $current_remaining + $bonus_amount;
-        
-        // Update the meta fields
-        update_post_meta($order_id, 'expected_amount', $new_expected);
-        update_post_meta($order_id, 'remaining_to_receive', $new_remaining);
-        
-        // Verify the update was successful
-        $updated_expected = (float)get_post_meta($order_id, 'expected_amount', true);
-        
-        if (abs($updated_expected - $new_expected) < 0.01) {
-            buytap_log('Bonus successfully applied to order', [
-                'order_id' => $order_id,
-                'bonus' => $bonus_amount,
-                'previous_expected' => $current_expected,
-                'new_expected' => $new_expected
-            ]);
-            return true;
-        } else {
-            buytap_log('Failed to update expected amount', [
-                'order_id' => $order_id,
-                'attempted_value' => $new_expected,
-                'stored_value' => $updated_expected
-            ]);
-            return false;
-        }
-    }
-    
-    buytap_log('No active order found for bonus application', ['user_id' => $user_id]);
-    return false;
-}
 
 //verification function (to check for and fix any discrepancies):
 function buytap_verify_bonus_application($user_id) {
@@ -432,33 +372,49 @@ function buytap_verify_bonus_application($user_id) {
             $order = get_post($bonus['applied_to_order']);
             if (!$order || $order->post_type !== 'buytap_order') {
                 $bonus['status'] = 'pending';
+                unset($bonus['applied_to_order']);
                 $needs_update = true;
                 continue;
             }
             
-            // Check if expected amount includes the bonus
-            $applied_bonus = (float) get_post_meta($order->ID, 'applied_referral_bonus', true);
-            $expected = (float) get_post_meta($order->ID, 'expected_amount', true);
+            // Get the recorded bonus amount from the order
+            $recorded_bonus = (float) get_post_meta($order->ID, 'applied_referral_bonus', true);
+            $expected_amount = (float) get_post_meta($order->ID, 'expected_amount', true);
             $base_amount = (float) get_post_meta($order->ID, 'amount_to_send', true);
-            $details = get_post_meta($order->ID, 'order_details', true);
             
-            // Calculate expected return without bonus
-            if (preg_match('/(\d+)% in (\d+) Days/', $details, $matches)) {
-                $profit_percent = (float) $matches[1];
-                $expected_without_bonus = $base_amount * (1 + ($profit_percent / 100));
+            // Calculate what the expected amount should be based on order details
+            $order_details = get_post_meta($order->ID, 'order_details', true);
+            $profit_percent = 0;
+            
+            if (strpos($order_details, '30% in 4 Days') !== false) {
+                $profit_percent = 30;
+            } elseif (strpos($order_details, '65% in 8 Days') !== false) {
+                $profit_percent = 65;
+            } elseif (strpos($order_details, '95% in 12 Days') !== false) {
+                $profit_percent = 95;
             } else {
-                $expected_without_bonus = $base_amount * 1.3; // Default to 30% if can't parse
+                $profit_percent = 30; // Default fallback
             }
             
-            // If expected amount is <= expected without bonus, bonus wasn't applied
-            if ($expected <= $expected_without_bonus + 0.01) { // Allow for floating point rounding
+            $expected_without_bonus = $base_amount * (1 + ($profit_percent / 100));
+            $expected_with_bonus = $expected_without_bonus + $bonus['bonus_amt'];
+            
+            // Check if the bonus was properly applied
+            $bonus_correct = (
+                abs($recorded_bonus - $bonus['bonus_amt']) < 0.01 && 
+                abs($expected_amount - $expected_with_bonus) < 0.01
+            );
+            
+            if (!$bonus_correct) {
+                // Bonus wasn't properly applied
                 $bonus['status'] = 'pending';
                 unset($bonus['applied_to_order']);
                 $needs_update = true;
                 
-                // Optionally reset the order's expected amount if it was incorrect
+                // Reset the order's expected amount if it was incorrect
                 update_post_meta($order->ID, 'expected_amount', $expected_without_bonus);
                 update_post_meta($order->ID, 'remaining_to_receive', $expected_without_bonus);
+                update_post_meta($order->ID, 'applied_referral_bonus', 0);
             }
         }
     }
@@ -1931,42 +1887,11 @@ function buytap_activate_buyer_if_complete($buyer_order_id) {
         ]);
     }
 
-    // =============================================
-    // ADDED: Apply referral bonuses at activation time
-    // =============================================
-    $user_id = get_post_field('post_author', $buyer_order_id);
-    $bonus_history = get_user_meta($user_id, 'referral_bonus_history', true) ?: [];
-    $total_bonus = 0;
-
-    foreach ($bonus_history as &$bonus) {
-        if ($bonus['status'] === 'pending') {
-            $total_bonus += $bonus['bonus_amt'];
-            $bonus['status'] = 'applied';
-            $bonus['applied_to_order'] = $buyer_order_id;
-        }
-    }
-
-    if ($total_bonus > 0) {
-        update_user_meta($user_id, 'referral_bonus_history', $bonus_history);
-        $expected += $total_bonus;
-        update_post_meta($buyer_order_id, 'applied_referral_bonus', $total_bonus);
-        buytap_log('Bonus applied during activation', [
-            'order_id' => $buyer_order_id,
-            'bonus' => $total_bonus,
-            'new_expected' => $expected
-        ]);
-    }
-    // =============================================
-
     // Activate and start the clock
     $now           = time();
     $duration_days = buytap_parse_duration_days($buyer_order_id);
     $maturity_ts   = $now + ($duration_days * 86400);
 
-    // Update expected amount with any bonuses applied
-    update_post_meta($buyer_order_id, 'expected_amount', $expected);
-    update_post_meta($buyer_order_id, 'remaining_to_receive', $expected);
-    
     update_post_meta($buyer_order_id, 'status', 'Active');
     update_post_meta($buyer_order_id, 'sub_status', 'Running');
     update_post_meta($buyer_order_id, 'is_paired', 'no'); // clear pairing state for new cycle
@@ -1977,8 +1902,7 @@ function buytap_activate_buyer_if_complete($buyer_order_id) {
     buytap_log('activate: success', [
         'buyer_order_id' => $buyer_order_id,
         'duration_days'  => $duration_days,
-        'matures_at'     => $maturity_ts,
-        'final_expected' => $expected
+        'matures_at'     => $maturity_ts
     ]);
 }
 
@@ -2006,67 +1930,9 @@ function buytap_close_seller_if_funded($seller_order_id) {
 /**
  * Immediate pairing trigger when orders are created
  */
-/**
- * Ensures referral bonus is added to expected amount when order becomes Active
- */
-add_action('wp_insert_post', function($post_id, $post, $update) {
-    // Only run for buytap_order posts that are being updated
-    if ($post->post_type !== 'buytap_order' || !$update) return;
-    
-    // Only proceed if status is changing to Active
-    $new_status = get_post_meta($post_id, 'status', true);
-    $old_status = get_post_meta($post_id, '_previous_status', true);
-    
-    if ($new_status !== 'Active' || $new_status === $old_status) return;
-    
-    // Get the user who owns this order
-    $user_id = $post->post_author;
-    $bonus_history = get_user_meta($user_id, 'referral_bonus_history', true);
-    
-    if (empty($bonus_history)) return;
-    
-    $total_bonus = 0;
-    
-    // Calculate total pending bonuses
-    foreach ($bonus_history as &$bonus) {
-        if ($bonus['status'] === 'pending') {
-            $total_bonus += $bonus['bonus_amt'];
-            $bonus['status'] = 'applied';
-            $bonus['applied_to_order'] = $post_id;
-        }
-    }
-    
-    if ($total_bonus > 0) {
-        // Update bonus history
-        update_user_meta($user_id, 'referral_bonus_history', $bonus_history);
-        
-        // Get current expected amount (without bonus)
-        $current_expected = (float) get_post_meta($post_id, 'expected_amount', true);
-        $new_expected = $current_expected + $total_bonus;
-        
-        // Update expected amount and remaining to receive
-        update_post_meta($post_id, 'expected_amount', $new_expected);
-        update_post_meta($post_id, 'remaining_to_receive', $new_expected);
-        update_post_meta($post_id, 'amount_to_make', $new_expected);
-        update_post_meta($post_id, 'applied_referral_bonus', $total_bonus);
-        
-        buytap_log('Bonus applied to active order', [
-            'order_id' => $post_id,
-            'bonus_amount' => $total_bonus,
-            'new_expected' => $new_expected
-        ]);
-    }
-    
-    // Store current status for next comparison
-    update_post_meta($post_id, '_previous_status', $new_status);
-}, 10, 3);
-
-/**
- * Initialize status tracking for new orders
- */
 add_action('wp_insert_post', function($post_id, $post, $update) {
     if ($post->post_type !== 'buytap_order' || $update) return;
-    update_post_meta($post_id, '_previous_status', get_post_meta($post_id, 'status', true));
+    buytap_pair_orders($post_id);
 }, 10, 3);
 
 add_action('buytap_hourly_pairing', 'buytap_run_auto_pairing');
