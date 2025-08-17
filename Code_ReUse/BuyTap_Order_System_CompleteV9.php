@@ -159,10 +159,35 @@ add_action('elementor_pro/forms/new_record', function($record, $handler) {
     // Get form fields
     $raw_fields = $record->get('fields');
 
-    // Get submitted values
-    $amount = $raw_fields['buytap_amount']['value'];
-    $duration = $raw_fields['buytap_duration']['value'];
+   // Get submitted values (force int for safety)
+    $amount   = isset($raw_fields['buytap_amount']['value']) ? (int) $raw_fields['buytap_amount']['value'] : 0;
+    $duration = $raw_fields['buytap_duration']['value'] ?? '';
+	
+	// 🔐 Get min/max purchase limits from BuyTap Settings plugin
+    $min_limit = (int) get_option('buytap_min_purchase', 500);
+    $max_limit = (int) get_option('buytap_max_purchase', 5000);
 
+	//TOKEN LIMITS PURCHASE 
+	// ✅ Enforce min/max rules
+    if ($amount < $min_limit) {
+        wp_die("Minimum purchase is {$min_limit} tokens. Please increase your amount.", 
+               "Invalid Amount", 
+               ['response' => 400]);
+    }
+    if ($amount > $max_limit) {
+        wp_die("Maximum purchase is {$max_limit} tokens. Please reduce your amount.", 
+               "Invalid Amount", 
+               ['response' => 400]);
+    }
+	 // ✅ Check if token pool has enough
+    $available = buytap_get_token_balance();
+    if ($amount > $available) {
+        // Stop order creation
+        wp_die("Sorry, only {$available} tokens are available right now. Please try with a smaller amount.", 
+               "Insufficient Tokens", 
+               ['response' => 400]);
+    }
+	
     // Calculate return based on duration selection
     $duration_days = 0;
     $profit_percent = 0;
@@ -246,6 +271,7 @@ add_action('elementor_pro/forms/new_record', function($record, $handler) {
     // Run auto pairing after buyer order creation
     buytap_pair_orders($order_id);
 }, 10, 2);
+
 
 //Shortcode For  My  Referal Bonus History
 add_shortcode('my_referral_bonus_history', function() {
