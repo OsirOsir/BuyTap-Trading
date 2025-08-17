@@ -1178,6 +1178,13 @@ add_action('wp_loaded', function () {
 		update_post_meta($order_id, 'remaining_to_receive', (float) get_post_meta($order_id, 'expected_amount', true));
 		update_post_meta($order_id, 'is_paired', 'no');
 
+		// Ensure atomic counter exists for this matured seller
+		if ('' === get_post_meta($order_id, 'seller_remaining', true)) {
+			$init = (float) get_post_meta($order_id, 'expected_amount', true);
+			if ($init <= 0) $init = (float) get_post_meta($order_id, 'amount_to_make', true);
+			update_post_meta($order_id, 'seller_remaining', $init);
+		}
+
         // Run auto pairing for matured orders
        	buytap_pair_orders($order_id);
         
@@ -1337,6 +1344,71 @@ function buytap_pair_lock_release($lock_key) {
     if ($lock_key) delete_transient($lock_key);
 }
 
+//Helpers (atomic reserve / give-back)
+// --- Atomic seller capacity controls (prevents over-pairing)
+function buytap_atomic_take_from_seller($seller_order_id, $requested) {
+    global $wpdb;
+    $requested = max(0.0, (float)$requested);
+    if ($requested <= 0) return 0.0;
+
+    $table = $wpdb->postmeta;
+    $key   = 'seller_remaining';
+
+    // Ensure the meta row exists
+    $exists = $wpdb->get_var($wpdb->prepare(
+        "SELECT meta_id FROM {$table} WHERE post_id=%d AND meta_key=%s LIMIT 1",
+        $seller_order_id, $key
+    ));
+    if (!$exists) {
+        $expected = (float) get_post_meta($seller_order_id, 'expected_amount', true);
+        if ($expected <= 0) $expected = (float) get_post_meta($seller_order_id, 'amount_to_make', true);
+        add_post_meta($seller_order_id, $key, $expected, true);
+    }
+
+    // Read current
+    $current = (float) get_post_meta($seller_order_id, $key, true);
+    if ($current <= 0) return 0.0;
+
+    $take = min($requested, $current);
+
+    // Atomic decrement: only succeed if enough remains
+    $affected = $wpdb->query($wpdb->prepare(
+        "UPDATE {$table}
+         SET meta_value = CAST(meta_value AS DECIMAL(10,2)) - %f
+         WHERE post_id=%d AND meta_key=%s
+           AND CAST(meta_value AS DECIMAL(10,2)) >= %f",
+        $take, $seller_order_id, $key, $take
+    ));
+
+    if ($affected === 1) return (float) $take;
+    return 0.0; // lost the race
+}
+
+function buytap_atomic_give_back_to_seller($seller_order_id, $amount) {
+    global $wpdb;
+    $amount = max(0.0, (float)$amount);
+    if ($amount <= 0) return;
+
+    $table = $wpdb->postmeta;
+    $key   = 'seller_remaining';
+
+    $exists = $wpdb->get_var($wpdb->prepare(
+        "SELECT meta_id FROM {$table} WHERE post_id=%d AND meta_key=%s LIMIT 1",
+        $seller_order_id, $key
+    ));
+    if (!$exists) {
+        add_post_meta($seller_order_id, $key, $amount, true);
+        return;
+    }
+
+    $wpdb->query($wpdb->prepare(
+        "UPDATE {$table}
+         SET meta_value = CAST(meta_value AS DECIMAL(10,2)) + %f
+         WHERE post_id=%d AND meta_key=%s",
+        $amount, $seller_order_id, $key
+    ));
+}
+
 
 
 /**
@@ -1351,16 +1423,15 @@ function buytap_perform_pairing($buyer_order_id, $seller_order_id, $initiator) {
     global $wpdb;
     $table_name = buytap_chunks_table();
 
-    // Recompute latest remaining (fresh from DB)
-    $buyer_remaining  = buytap_buyer_remaining($buyer_order_id);
-    $seller_remaining = buytap_seller_remaining($seller_order_id);
+    // Fresh remaining
+    $buyer_remaining = buytap_buyer_remaining($buyer_order_id);
+    if ($buyer_remaining <= 0) return false;
 
-    // Stop if either side is already satisfied
-    if ($buyer_remaining <= 0 || $seller_remaining <= 0) {
-        return false;
-    }
+    // Reserve capacity from the seller atomically (the key to stop overshoot)
+    $chunk_amount = buytap_atomic_take_from_seller($seller_order_id, $buyer_remaining);
+    if ($chunk_amount <= 0) return false;
 
-    // Prevent creating duplicate pending rows for the same buyer/seller combo
+    // Optional pre-check to avoid duplicate pairs (still handle rollback below)
     $existing = (int) $wpdb->get_var($wpdb->prepare(
         "SELECT COUNT(*) FROM $table_name
          WHERE buyer_order_id = %d AND seller_order_id = %d
@@ -1368,16 +1439,12 @@ function buytap_perform_pairing($buyer_order_id, $seller_order_id, $initiator) {
         $buyer_order_id, $seller_order_id
     ));
     if ($existing > 0) {
+        // give back reserved amount and skip
+        buytap_atomic_give_back_to_seller($seller_order_id, $chunk_amount);
         return false;
     }
 
-    // Amount to allocate in this chunk
-    $chunk_amount = min($buyer_remaining, $seller_remaining);
-
-    // Guard: ignore tiny/invalid amounts
-    if ($chunk_amount < 1) return false;
-
-    // Create the chunk
+    // Create chunk with the reserved amount
     $ok = $wpdb->insert($table_name, [
         'buyer_order_id' => $buyer_order_id,
         'seller_order_id'=> $seller_order_id,
@@ -1385,13 +1452,19 @@ function buytap_perform_pairing($buyer_order_id, $seller_order_id, $initiator) {
         'status'         => 'Awaiting Payment',
         'pair_time'      => current_time('timestamp', true),
     ]);
-    if ($ok === false) return false;
 
-    // Update "remaining" metas based on *fresh* sums
-    update_post_meta($buyer_order_id,  'remaining_to_send',     max(0, buytap_buyer_remaining($buyer_order_id)));
-    update_post_meta($seller_order_id, 'remaining_to_receive',  max(0, buytap_seller_remaining($seller_order_id)));
+    if ($ok === false) {
+        // Roll back the reservation if insert failed (e.g., unique key race)
+        buytap_atomic_give_back_to_seller($seller_order_id, $chunk_amount);
+        return false;
+    }
 
-    // Set/refresh buyer-level pair_time for timeout/revocation logic
+    // Sync buyer & seller metas
+    update_post_meta($buyer_order_id,  'remaining_to_send',    max(0, buytap_buyer_remaining($buyer_order_id)));
+    $seller_counter = max(0, (float) get_post_meta($seller_order_id, 'seller_remaining', true));
+    update_post_meta($seller_order_id, 'remaining_to_receive', $seller_counter);
+
+    // Stamp buyer pair time for countdown
     update_post_meta($buyer_order_id, 'pair_time', current_time('timestamp', true));
 
     // If buyer fully matched now, set paired status
@@ -1401,13 +1474,14 @@ function buytap_perform_pairing($buyer_order_id, $seller_order_id, $initiator) {
         update_post_meta($buyer_order_id, 'is_paired', 'yes');
     }
 
-    // If seller fully allocated now, mark helper flag
+    // If seller fully allocated now, flag it
     if (buytap_seller_remaining($seller_order_id) <= 0) {
         update_post_meta($seller_order_id, 'is_paired', 'yes');
     }
 
     return true;
 }
+
 
 
 /**
@@ -1619,6 +1693,9 @@ add_action('init', function () {
         // Delete/void the chunk
         $wpdb->delete($t, ['id' => (int)$chunk->id]);
 
+		// Return reserved capacity to the seller (so they can be paired again)
+		buytap_atomic_give_back_to_seller($seller_id, $amount);
+
         // Recompute remaining balances
         update_post_meta($buyer_id,  'remaining_to_send',    max(0, buytap_buyer_remaining($buyer_id)));
         update_post_meta($seller_id, 'remaining_to_receive', max(0, buytap_seller_remaining($seller_id)));
@@ -1791,15 +1868,21 @@ function buytap_buyer_remaining($buyer_order_id) {
  * @return float Remaining amount to receive
  */
 function buytap_seller_remaining($seller_order_id) {
-    // Use expected_amount so referral bonuses count toward the target
-    $target    = (float) get_post_meta($seller_order_id, 'expected_amount', true);
+    // Prefer the atomic counter if present
+    $meta = get_post_meta($seller_order_id, 'seller_remaining', true);
+    if ($meta !== '' && $meta !== null) {
+        return max(0, (float) $meta);
+    }
+
+    // Legacy fallback (for old data): target - allocated
+    $target = (float) get_post_meta($seller_order_id, 'expected_amount', true);
     if ($target <= 0) {
-        // Fallback for legacy orders
         $target = (float) get_post_meta($seller_order_id, 'amount_to_make', true);
     }
     $allocated = buytap_seller_allocated_amount($seller_order_id);
     return max(0, $target - $allocated);
 }
+
 
 
 /**
