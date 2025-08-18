@@ -143,6 +143,8 @@ function buytap_save_order_meta($post_id) {
     }
 }
 
+
+
 // =============================================
 // ELEMENTOR FORM INTEGRATION - ORDER CREATION
 // =============================================
@@ -167,25 +169,32 @@ add_action('elementor_pro/forms/new_record', function($record, $handler) {
     $min_limit = (int) get_option('buytap_min_purchase', 500);
     $max_limit = (int) get_option('buytap_max_purchase', 5000);
 
-	//TOKEN LIMITS PURCHASE 
-	// ✅ Enforce min/max rules
-    if ($amount < $min_limit) {
-    $handler->add_error('buytap_amount', "Minimum purchase is {$min_limit} tokens.");
-    return;
-	}
-	if ($amount > $max_limit) {
-		$handler->add_error('buytap_amount', "Maximum purchase is {$max_limit} tokens.");
+	// ✅ Validation checks
+	$available = buytap_get_token_balance();
+	// Too small
+	if ($amount < $min_limit) {
+		$handler->add_error('buytap_amount', "Minimum purchase is {$min_limit} tokens.");
+		$handler->add_response('validation_failed', true); // prevent global form error
 		return;
 	}
-	 // ✅ Check if token pool has enough
-    $available = buytap_get_token_balance();
-    if ($amount > $available) {
-        // Stop order creation
-        wp_die("Sorry, only {$available} tokens are available right now. Please try with a smaller amount.", 
-               "Insufficient Tokens", 
-               ['response' => 400]);
-    }
-	
+
+	// Too large
+	if ($amount > $max_limit) {
+		$handler->add_error('buytap_amount', "Maximum purchase is {$max_limit} tokens.");
+		$handler->add_response('validation_failed', true); // prevent global form error
+		return;
+	}
+
+	// ✅ Check if token pool has enough
+	if ($amount > $available) {
+		if ($available <= 0) {
+			$handler->add_error('buytap_amount', "❌ Purchase unavailable — token pool is empty. Please try again later.");
+		} else {
+			$handler->add_error('buytap_amount', "Only {$available} tokens are available. Please lower your amount.");
+		}
+		$handler->add_response('validation_failed', true); // suppress Elementor generic message
+		return;
+	}
     // Calculate return based on duration selection
     $duration_days = 0;
     $profit_percent = 0;
