@@ -42,7 +42,10 @@ $a = shortcode_atts([
   'show_for_seconds'  => $opts['show_for_seconds'],
   'open_times'        => $opts['open_times'],
   'open_dates'        => $opts['open_dates'],
-  'heading'           => 'Next Token Sale Starts In:',
+  // 'heading'           => 'Next Token Sale Starts In:',
+//   'heading'  		  => '⏳BuyTap Official Launch — 9th September:',
+//   'heading'           => '⏳ “Launching BuyTap on 9/9 — Get Ready!”:',
+   'heading'          => '⏳ Launch Day: 9th September :',
 ], $atts, 'buytap_countdown');
 
 
@@ -90,7 +93,11 @@ $a = shortcode_atts([
     </div>
 
     <div id="<?= esc_attr($timer_id); ?>" role="timer" aria-live="polite" class="buytap-timer">
-      <div class="time-block">
+		<div class="time-block">
+			<div class="time-number" id="days-<?= esc_attr($uid); ?>">00</div>
+			<div class="time-label">Days</div>
+		</div>
+		<div class="time-block">
         <div class="time-number" id="<?= esc_attr($hours_id); ?>">00</div>
         <div class="time-label">Hours</div>
       </div>
@@ -154,6 +161,7 @@ $a = shortcode_atts([
 			: [];
 
           const wrapEl      = document.getElementById('<?= esc_js($wrap_id); ?>');
+		  const daysEl      = document.getElementById('days-<?= esc_js($uid); ?>');
           const hoursEl     = document.getElementById('<?= esc_js($hours_id); ?>');
           const minutesEl   = document.getElementById('<?= esc_js($mins_id); ?>');
           const secondsEl   = document.getElementById('<?= esc_js($secs_id); ?>');
@@ -280,21 +288,36 @@ $a = shortcode_atts([
               }
             }
 
-            const diff = targetTime.diff(now, ['hours','minutes','seconds']).toObject();
+            const diff = targetTime.diff(now, ['days','hours','minutes','seconds']).toObject();
+			const d = String(Math.max(0, Math.floor(diff.days || 0))).padStart(2,'0');
             const h = String(Math.max(0, Math.floor(diff.hours || 0))).padStart(2,'0');
             const m = String(Math.max(0, Math.floor(diff.minutes || 0))).padStart(2,'0');
             const s = String(Math.max(0, Math.floor(diff.seconds || 0))).padStart(2,'0');
 
-            if (hoursEl)   hoursEl.textContent = h;
-            if (minutesEl) minutesEl.textContent = m;
-            if (secondsEl) secondsEl.textContent = s;
+            if (daysEl) {
+			if (parseInt(d) > 0) {
+				daysEl.textContent = d;
+				daysEl.parentElement.style.display = "block"; // show days block
+			} else {
+				daysEl.parentElement.style.display = "none";  // hide days block
+			}
+			}
+
+			if (hoursEl)   hoursEl.textContent = h;
+			if (minutesEl) minutesEl.textContent = m;
+			if (secondsEl) secondsEl.textContent = s;
+
 
             // Time reached -> show form for the window duration
-            if ((diff.hours || 0) <= 0 && (diff.minutes || 0) <= 0 && (diff.seconds || 0) <= 0) {
-              showFormThenHideLater(now);
-              return;
-            }
-
+            if (
+			  (diff.days || 0) <= 0 &&
+			  (diff.hours || 0) <= 0 &&
+			  (diff.minutes || 0) <= 0 &&
+			  (diff.seconds || 0) <= 0
+			) {
+			  showFormThenHideLater(now);
+			  return;
+			}
             requestAnimationFrame(updateCountdown);
           }
 
