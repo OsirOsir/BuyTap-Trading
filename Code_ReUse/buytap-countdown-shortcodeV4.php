@@ -139,214 +139,210 @@ $a = shortcode_atts([
     </style>
 
     <script>
-  (function() {
-    // Runs after Luxon loads (in footer)
-    document.addEventListener('DOMContentLoaded', function () {
-      if (!window.luxon) return;
-      const DateTime = window.luxon.DateTime;
+      (function() {
+		  let formOpen = false; 
+        // Runs after Luxon loads (in footer)
+        document.addEventListener('DOMContentLoaded', function () {
+          if (!window.luxon) return;
+          const DateTime = window.luxon.DateTime;
 
-      const root = document.querySelector('[data-uid="<?= esc_js($uid); ?>"]');
-      if (!root) return;
+          const root = document.querySelector('[data-uid="<?= esc_js($uid); ?>"]');
+          if (!root) return;
 
-      // Read config
-      const tz          = root.getAttribute('data-tz') || 'Africa/Nairobi';
-      const mode        = root.getAttribute('data-mode') || 'test';
-      const testWait    = parseInt(root.getAttribute('data-test-wait') || '60', 10);
-      const showFor     = parseInt(root.getAttribute('data-show-for') || '3600', 10);
-      const openTimes   = (root.getAttribute('data-open-times') || '09:00,19:00').split(',');
-      const openDatesRaw = (root.getAttribute('data-open-dates') || '').trim();
-      // Accept lines or comma-separated
-      const openDates = openDatesRaw
-        ? openDatesRaw.split(/\n|,/).map(s => s.trim()).filter(Boolean)
-        : [];
+          // Read config
+          const tz          = root.getAttribute('data-tz') || 'Africa/Nairobi';
+          const mode        = root.getAttribute('data-mode') || 'test';
+          const testWait    = parseInt(root.getAttribute('data-test-wait') || '60', 10);
+          const showFor     = parseInt(root.getAttribute('data-show-for') || '3600', 10);
+          const openTimes   = (root.getAttribute('data-open-times') || '09:00,19:00').split(',');
+			const openDatesRaw = (root.getAttribute('data-open-dates') || '').trim();
+			// Accept lines or comma-separated
+			const openDates = openDatesRaw
+			? openDatesRaw.split(/\n|,/).map(s => s.trim()).filter(Boolean)
+			: [];
 
-      const wrapEl      = document.getElementById('<?= esc_js($wrap_id); ?>');
-      const daysEl      = document.getElementById('days-<?= esc_js($uid); ?>');
-      const hoursEl     = document.getElementById('<?= esc_js($hours_id); ?>');
-      const minutesEl   = document.getElementById('<?= esc_js($mins_id); ?>');
-      const secondsEl   = document.getElementById('<?= esc_js($secs_id); ?>');
+          const wrapEl      = document.getElementById('<?= esc_js($wrap_id); ?>');
+		  const daysEl      = document.getElementById('days-<?= esc_js($uid); ?>');
+          const hoursEl     = document.getElementById('<?= esc_js($hours_id); ?>');
+          const minutesEl   = document.getElementById('<?= esc_js($mins_id); ?>');
+          const secondsEl   = document.getElementById('<?= esc_js($secs_id); ?>');
 
-      // Find the form using the selector (Elementor compatible)
-      const formSelector = root.getAttribute('data-form-selector') || '#buy-form';
-      const formEl = document.querySelector(formSelector);
+          // Find the form using the selector (Elementor compatible)
+          const formSelector = root.getAttribute('data-form-selector') || '#buy-form';
+          const formEl = document.querySelector(formSelector);
 
-      // Add animation frame variable at the top of the function scope
-      let animationFrameId = null;
+			// ✅ Stable localStorage key (persists across refresh)
+		  const selectorKey = (formSelector || '#buy-form').replace(/[^a-z0-9_-]/gi, '_');
+		  const pageKey = (location.pathname || '/').replace(/[^a-z0-9_-]/gi, '_');
+		  const LS_KEY = `buyFormHideAt_${selectorKey}_${pageKey}`;
+			
+			function parseExplicitDate(entry, tz, fallbackTimeHHMM) {
+			  // Accept "YYYY-MM-DD HH:MM" or "YYYY-MM-DD"
+			  const hasTime = /\d{2}:\d{2}$/.test(entry);
+			  let dt;
 
-      function parseExplicitDate(entry, tz, fallbackTimeHHMM) {
-        // Accept "YYYY-MM-DD HH:MM" or "YYYY-MM-DD"
-        const hasTime = /\d{2}:\d{2}$/.test(entry);
-        let dt;
+			  if (hasTime) {
+				// Allow "YYYY-MM-DD HH:MM" (space) by converting to ISO "YYYY-MM-DDTHH:MM"
+				const iso = entry.replace(' ', 'T');
+				dt = DateTime.fromISO(iso, { zone: tz });
+			  } else {
+				// Date only → use first openTimes as the time
+				const [hh, mm] = (fallbackTimeHHMM || '09:00').split(':').map(Number);
+				dt = DateTime.fromISO(entry, { zone: tz }).set({ hour: hh, minute: mm, second: 0, millisecond: 0 });
+			  }
 
-        if (hasTime) {
-          // Allow "YYYY-MM-DD HH:MM" (space) by converting to ISO "YYYY-MM-DDTHH:MM"
-          const iso = entry.replace(' ', 'T');
-          dt = DateTime.fromISO(iso, { zone: tz });
-        } else {
-          // Date only → use first openTimes as the time
-          const [hh, mm] = (fallbackTimeHHMM || '09:00').split(':').map(Number);
-          dt = DateTime.fromISO(entry, { zone: tz }).set({ hour: hh, minute: mm, second: 0, millisecond: 0 });
-        }
+			  return dt && dt.isValid ? dt : null;
+			}
 
-        return dt && dt.isValid ? dt : null;
-      }
+			function nextExplicitOpen() {
+			  if (!openDates.length) return null;
+			  const now = DateTime.now().setZone(tz);
+			  let next = null;
+			  for (const entry of openDates) {
+				const dt = parseExplicitDate(entry, tz, openTimes[0] || '09:00');
+				if (!dt) continue;
+				if (dt > now && (!next || dt < next)) next = dt;
+			  }
+			  return next;
+			}
 
-      function nextExplicitOpen() {
-        if (!openDates.length) return null;
-        const now = DateTime.now().setZone(tz);
-        let next = null;
-        for (const entry of openDates) {
-          const dt = parseExplicitDate(entry, tz, openTimes[0] || '09:00');
-          if (!dt) continue;
-          if (dt > now && (!next || dt < next)) next = dt;
-        }
-        return next;
-      }
+			function nextScheduledOpen() {
+			  const now = DateTime.now().setZone(tz);
+			  const today = now.startOf('day');
+			  let next = null;
+			  for (let t of openTimes) {
+				const [hh, mm] = t.trim().split(':').map(Number);
+				const cand = today.set({ hour: hh, minute: mm, second: 0, millisecond: 0 });
+				if (cand > now && (!next || cand < next)) next = cand;
+			  }
+			  if (!next) {
+				const [hh, mm] = (openTimes[0] || '09:00').split(':').map(Number);
+				next = today.plus({ days: 1 }).set({ hour: hh, minute: mm, second: 0, millisecond: 0 });
+			  }
+			  return next;
+			}
 
-      function nextScheduledOpen() {
-        const now = DateTime.now().setZone(tz);
-        const today = now.startOf('day');
-        let next = null;
-        for (let t of openTimes) {
-          const [hh, mm] = t.trim().split(':').map(Number);
-          const cand = today.set({ hour: hh, minute: mm, second: 0, millisecond: 0 });
-          if (cand > now && (!next || cand < next)) next = cand;
-        }
-        if (!next) {
-          const [hh, mm] = (openTimes[0] || '09:00').split(':').map(Number);
-          next = today.plus({ days: 1 }).set({ hour: hh, minute: mm, second: 0, millisecond: 0 });
-        }
-        return next;
-      }
+          function getNextDropTime() {
+			  if (mode === 'schedule') {
+				// Prefer explicit dates if provided; otherwise use daily schedule
+				const explicit = nextExplicitOpen();
+				if (explicit) return explicit;
+				return nextScheduledOpen();
+			  }
+			  // test mode
+			  return DateTime.now().setZone(tz).plus({ seconds: testWait });
+			}
 
-      function getNextDropTime() {
-        if (mode === 'schedule') {
-          // Prefer explicit dates if provided; otherwise use daily schedule
-          const explicit = nextExplicitOpen();
-          if (explicit) return explicit;
-          return nextScheduledOpen();
-        }
-        // test mode
-        return DateTime.now().setZone(tz).plus({ seconds: testWait });
-      }
 
-      // LocalStorage key is unique per instance to allow multiple on a page
-      const LS_KEY = "buyFormHideAt_<?= esc_js($uid); ?>";
-
-      let targetTime = getNextDropTime();
-
-      function showFormThenHideLater(now) {
-        if (formEl) formEl.style.display = 'block';
-        if (wrapEl) wrapEl.style.display = 'none';
-
-        const hideAt = now.plus({ seconds: showFor });
-        localStorage.setItem(LS_KEY, hideAt.toISO());
-
-        // Cross-tab sync
-        window.addEventListener('storage', function (e) {
-          if (e.key !== LS_KEY) return;
-          const newVal = e.newValue;
-          if (newVal) {
-            const now = DateTime.now().setZone(tz);
-            const hideAtTime = DateTime.fromISO(newVal);
-            if (now < hideAtTime) {
-              if (formEl) formEl.style.display = 'block';
-              if (wrapEl) wrapEl.style.display = 'none';
-              const msLeft = hideAtTime.diff(now).toMillis();
-              setTimeout(resetToCountdown, msLeft);
-            }
-          } else {
-            resetToCountdown();
-          }
-        });
-
-        setTimeout(resetToCountdown, showFor * 1000);
-      }
-
-      function resetToCountdown() {
-        if (formEl) formEl.style.display = 'none';
-        if (wrapEl) wrapEl.style.display = 'block';
-        localStorage.removeItem(LS_KEY);
-        targetTime = getNextDropTime();
-        if (animationFrameId) {
-          cancelAnimationFrame(animationFrameId);
-          animationFrameId = null;
-        }
-        // Restart the countdown
-        updateCountdown();
-      }
-
-      function updateCountdown() {
-        const now = DateTime.now().setZone(tz);
+          // LocalStorage key is unique per instance to allow multiple on a page
         
-        // 🔑 Always respect stored hideAt first
-        const storedHideAt = localStorage.getItem(LS_KEY);
-        if (storedHideAt) {
-          const hideAtTime = DateTime.fromISO(storedHideAt);
-          if (now < hideAtTime) {
-            // Show form; schedule reset when window ends
+
+          let targetTime = getNextDropTime();
+
+          function showFormThenHideLater(now) {
+			  if (formOpen) return;   // <--- prevent double triggering
+			  formOpen = true;
+			  
             if (formEl) formEl.style.display = 'block';
             if (wrapEl) wrapEl.style.display = 'none';
-            const msLeft = hideAtTime.diff(now).toMillis();
-            setTimeout(resetToCountdown, msLeft);
-            if (animationFrameId) {
-              cancelAnimationFrame(animationFrameId);
-              animationFrameId = null;
+
+            const hideAt = now.plus({ seconds: showFor });
+            localStorage.setItem(LS_KEY, hideAt.toISO());
+			localStorage.setItem(LS_KEY + "_status", "open");   // ✅ add this
+			  
+            // Cross-tab sync
+            window.addEventListener('storage', function (e) {
+              if (e.key !== LS_KEY) return;
+              const newVal = e.newValue;
+              if (newVal) {
+                const now = DateTime.now().setZone(tz);
+                const hideAtTime = DateTime.fromISO(newVal);
+                if (now < hideAtTime) {
+                  if (formEl) formEl.style.display = 'block';
+                  if (wrapEl) wrapEl.style.display = 'none';
+                  const msLeft = hideAtTime.diff(now).toMillis();
+                  setTimeout(resetToCountdown, msLeft);
+                }
+              } else {
+                resetToCountdown();
+              }
+            });
+
+            setTimeout(resetToCountdown, showFor * 1000);
+          }
+
+          function resetToCountdown() {
+			  formOpen = false;   // <--- reset flag so it can reopen next cycle
+			  if (formEl) formEl.style.display = 'none';
+			  if (wrapEl) wrapEl.style.display = 'block';
+			  localStorage.removeItem(LS_KEY);
+			  localStorage.removeItem(LS_KEY + "_status");   // ✅ add this
+			  targetTime = getNextDropTime();
+			  updateCountdown();
+			}
+
+          function updateCountdown() {
+            const now = DateTime.now().setZone(tz);
+
+            // If there's a stored hideAt, respect it (form visible window)
+            const storedHideAt = localStorage.getItem(LS_KEY);
+			const storedStatus = localStorage.getItem(LS_KEY + "_status");
+            if (storedHideAt && storedStatus === "open") {
+              const hideAtTime = DateTime.fromISO(storedHideAt);
+              if (now < hideAtTime) {
+                // Show form; schedule reset when window ends
+                if (formEl) formEl.style.display = 'block';
+                if (wrapEl) wrapEl.style.display = 'none';
+                const msLeft = hideAtTime.diff(now).toMillis();
+                setTimeout(resetToCountdown, msLeft);
+                return;
+              } else {
+                localStorage.removeItem(LS_KEY);
+				localStorage.removeItem(LS_KEY + "_status");
+              }
             }
-            return;// 🚨 stop here (don't calculate new targetTime)
-          } else {
-            // 👉 Window expired → cleanup
-            localStorage.removeItem(LS_KEY);
-            targetTime = getNextDropTime(); // only reset now
+
+            const diff = targetTime.diff(now, ['days','hours','minutes','seconds']).toObject();
+			const d = String(Math.max(0, Math.floor(diff.days || 0))).padStart(2,'0');
+            const h = String(Math.max(0, Math.floor(diff.hours || 0))).padStart(2,'0');
+            const m = String(Math.max(0, Math.floor(diff.minutes || 0))).padStart(2,'0');
+            const s = String(Math.max(0, Math.floor(diff.seconds || 0))).padStart(2,'0');
+
+            if (daysEl) {
+			if (parseInt(d) > 0) {
+				daysEl.textContent = d;
+				daysEl.parentElement.style.display = "block"; // show days block
+			} else {
+				daysEl.parentElement.style.display = "none";  // hide days block
+			}
+			}
+
+			if (hoursEl)   hoursEl.textContent = h;
+			if (minutesEl) minutesEl.textContent = m;
+			if (secondsEl) secondsEl.textContent = s;
+
+
+            // Time reached -> show form for the window duration
+            if (
+			  (diff.days || 0) <= 0 &&
+			  (diff.hours || 0) <= 0 &&
+			  (diff.minutes || 0) <= 0 &&
+			  (diff.seconds || 0) <= 0
+			) {
+			  showFormThenHideLater(now);
+			  return;
+			}
+            requestAnimationFrame(updateCountdown);
           }
-        }
 
-        const diff = targetTime.diff(now, ['days','hours','minutes','seconds']).toObject();
-        const d = String(Math.max(0, Math.floor(diff.days || 0))).padStart(2,'0');
-        const h = String(Math.max(0, Math.floor(diff.hours || 0))).padStart(2,'0');
-        const m = String(Math.max(0, Math.floor(diff.minutes || 0))).padStart(2,'0');
-        const s = String(Math.max(0, Math.floor(diff.seconds || 0))).padStart(2,'0');
-
-        if (daysEl) {
-          if (parseInt(d) > 0) {
-            daysEl.textContent = d;
-            daysEl.parentElement.style.display = "block"; // show days block
-          } else {
-            daysEl.parentElement.style.display = "none";  // hide days block
-          }
-        }
-
-        if (hoursEl)   hoursEl.textContent = h;
-        if (minutesEl) minutesEl.textContent = m;
-        if (secondsEl) secondsEl.textContent = s;
-
-        // Time reached -> show form for the window duration
-        if (
-          (diff.days || 0) <= 0 &&
-          (diff.hours || 0) <= 0 &&
-          (diff.minutes || 0) <= 0 &&
-          (diff.seconds || 0) <= 0
-        ) {
-          showFormThenHideLater(now);
-          // Cancel any ongoing animation frame
-          if (animationFrameId) {
-            cancelAnimationFrame(animationFrameId);
-            animationFrameId = null;
-          }
-          return;
-        }
-        // Store the animation frame ID so we can cancel it later
-        animationFrameId = requestAnimationFrame(updateCountdown);
-      }
-
-      // Start
-      // Ensure countdown visible, form hidden initially (unless a window is active)
-      if (formEl) formEl.style.display = 'none';
-      if (wrapEl) wrapEl.style.display = 'block';
-      updateCountdown();
-    });
-  })();
-</script>
+          // Start
+          // Ensure countdown visible, form hidden initially (unless a window is active)
+          if (formEl) formEl.style.display = 'none';
+          if (wrapEl) wrapEl.style.display = 'block';
+          updateCountdown();
+        });
+      })();
+    </script>
   </div>
   <?php
   return ob_get_clean();
