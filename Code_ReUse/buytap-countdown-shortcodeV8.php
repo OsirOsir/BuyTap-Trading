@@ -73,19 +73,24 @@ $a = shortcode_atts([
   $mins_id   = "minutes-$uid";
   $secs_id   = "seconds-$uid";
 
+	
+	// Add this before ob_start()
+	$server_now_iso = gmdate('c'); // e.g., "2025-08-26T12:34:56+00:00"
   // Data attributes for the script
   $data_attrs = sprintf(
-    ' data-form-selector="%s" data-tz="%s" data-mode="%s" data-test-wait="%d" data-show-for="%d" data-open-times="%s" data-open-dates="%s" data-uid="%s" data-key-suffix="%s" ',
-    esc_attr($a['form_selector']),
-    esc_attr($a['tz']),
-    esc_attr($a['mode']),
-    (int)$a['test_wait_seconds'],
-    (int)$a['show_for_seconds'],
-    esc_attr($a['open_times']),
-    esc_attr($a['open_dates']),
-    esc_attr($uid),
-	esc_attr($a['key_suffix']),
+  ' data-form-selector="%s" data-tz="%s" data-mode="%s" data-test-wait="%d" data-show-for="%d" data-open-times="%s" data-open-dates="%s" data-uid="%s" data-key-suffix="%s" data-server-now="%s" ',
+  esc_attr($a['form_selector']),
+  esc_attr($a['tz']),
+  esc_attr($a['mode']),
+  (int)$a['test_wait_seconds'],
+  (int)$a['show_for_seconds'],
+  esc_attr($a['open_times']),
+  esc_attr($a['open_dates']),
+  esc_attr($uid),
+  esc_attr($a['key_suffix']),
+  esc_attr($server_now_iso)
 );
+
 
   ob_start(); ?>
   <div class="buytap-countdown-wrapper" <?= $data_attrs; ?>>
@@ -164,6 +169,26 @@ $a = shortcode_atts([
 			? openDatesRaw.split(/\n|,/).map(s => s.trim()).filter(Boolean)
 			: [];
 
+			// Read server time (UTC ISO) embedded by PHP
+			const serverNowISO = root.getAttribute('data-server-now'); // e.g., "2025-08-26T12:34:56+00:00"
+			const serverNowUTC = serverNowISO ? DateTime.fromISO(serverNowISO, { zone: 'utc' }) : null;
+
+			// Capture the client time at load (UTC)
+			const clientLoadUTC = DateTime.utc();
+
+			// Compute offset: how much the client's clock differs from server clock
+			const offsetMs = serverNowUTC ? (serverNowUTC.toMillis() - clientLoadUTC.toMillis()) : 0;
+
+			// Helper: "now" according to the server, expressed in UTC
+			function nowUTC() {
+			  return DateTime.utc().plus({ milliseconds: offsetMs });
+			}
+
+			// Helper: "now" in the configured zone, but still anchored to server time
+			function nowInZone() {
+			  return nowUTC().setZone(tz);
+			}
+
           const wrapEl      = document.getElementById('<?= esc_js($wrap_id); ?>');
 		  const daysEl      = document.getElementById('days-<?= esc_js($uid); ?>');
           const hoursEl     = document.getElementById('<?= esc_js($hours_id); ?>');
@@ -188,7 +213,7 @@ $a = shortcode_atts([
 			if (!window.buytapStorageListenerAttached) {
 				  window.addEventListener('storage', function (e) {
 					if (e.key === G_KEY || e.key === G_STAT) {
-					  updateCountdown();  // force re-check instantly
+					  requestAnimationFrame(updateCountdown);  // force re-check instantly
 					}
 				  });
 				  window.buytapStorageListenerAttached = true;
@@ -215,7 +240,7 @@ $a = shortcode_atts([
 
 			function nextExplicitOpen() {
 			  if (!openDates.length) return null;
-			  const now = DateTime.now().setZone(tz);
+			  const now = nowInZone();
 			  let next = null;
 			  for (const entry of openDates) {
 				const dt = parseExplicitDate(entry, tz, openTimes[0] || '09:00');
@@ -226,7 +251,7 @@ $a = shortcode_atts([
 			}
 
 			function nextScheduledOpen() {
-			  const now = DateTime.now().setZone(tz);
+			  const now = nowInZone();
 			  const today = now.startOf('day');
 			  let next = null;
 			  for (let t of openTimes) {
@@ -249,7 +274,7 @@ $a = shortcode_atts([
 				return nextScheduledOpen();
 			  }
 			  // test mode
-			  return DateTime.now().setZone(tz).plus({ seconds: testWait });
+			  return nowInZone().plus({ seconds: testWait });
 			}
 
 
@@ -273,42 +298,40 @@ $a = shortcode_atts([
 			  localStorage.setItem(G_STAT, "open");
 
 			  // ✅ Cross-tab sync (only attach once)
-			  if (!storageListenerAttached) {
-				window.addEventListener('storage', function (e) {
-				  if (e.key !== LS_KEY) return;
-				  const newVal = e.newValue;
-				  const now2 = DateTime.now().setZone(tz);
-
-				  if (newVal) {
-					const hideAtTime = DateTime.fromISO(newVal);
-					if (now2 < hideAtTime) {
-					  if (formEl) formEl.style.display = 'block';
-					  if (wrapEl) wrapEl.style.display = 'none';
-					  const msLeft = hideAtTime.diff(now2).toMillis();
-					  setTimeout(resetToCountdown, msLeft);
+			  if (!window.buytapStorageListenerAttached) {
+				  window.addEventListener('storage', function (e) {
+					if (e.key !== LS_KEY) return;
+					const newVal = e.newValue;
+					const now2 = nowInZone();
+					if (newVal) {
+					  const hideAtTime = DateTime.fromISO(newVal);
+					  if (now2 < hideAtTime) {
+						if (formEl) formEl.style.display = 'block';
+						if (wrapEl) wrapEl.style.display = 'none';
+						const msLeft = hideAtTime.diff(now2).toMillis();
+						setTimeout(resetToCountdown, msLeft);
+					  }
+					} else {
+					  resetToCountdown();
 					}
-				  } else {
-					resetToCountdown();
-				  }
-				});
-				storageListenerAttached = true; // ensure listener only added once
-			  }
-
+				  });
+				  window.buytapStorageListenerAttached = true;
+				}
 			  setTimeout(resetToCountdown, showFor * 1000);
 			}
 
           function resetToCountdown() {
-			  formOpen = false;
+			  formOpen = false;   // <--- reset flag so it can reopen next cycle
 			  if (formEl) formEl.style.display = 'none';
 			  if (wrapEl) wrapEl.style.display = 'block';
 			  localStorage.removeItem(LS_KEY);
-			  localStorage.removeItem(LS_KEY + "_status");
+			  localStorage.removeItem(LS_KEY + "_status");   // ✅ add this
 			  targetTime = getNextDropTime();
-			  requestAnimationFrame(updateCountdown); // ✅ restart loop
+			  requestAnimationFrame(updateCountdown);
 			}
 
           function updateCountdown() {
-            const now = DateTime.now().setZone(tz);
+            const now = nowInZone();
 
 			  
 			  // ✅ First check global state
@@ -380,7 +403,7 @@ $a = shortcode_atts([
 
           // Start
           // Start — set initial visibility based on persisted state to avoid flicker
-			const nowStart = DateTime.now().setZone(tz);
+			const nowStart = nowInZone();
 			const storedHideAtStart = localStorage.getItem(LS_KEY);
 			const storedStatusStart = localStorage.getItem(LS_KEY + "_status");
 
@@ -395,7 +418,7 @@ $a = shortcode_atts([
 				if (formEl) formEl.style.display = 'none';
 				if (wrapEl) wrapEl.style.display = 'block';
 			}
-			updateCountdown();
+			requestAnimationFrame(updateCountdown);
         });
       })();
     </script>
