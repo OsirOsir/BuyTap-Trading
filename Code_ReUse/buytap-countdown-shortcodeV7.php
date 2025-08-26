@@ -75,7 +75,7 @@ $a = shortcode_atts([
 
   // Data attributes for the script
   $data_attrs = sprintf(
-    ' data-form-selector="%s" data-tz="%s" data-mode="%s" data-test-wait="%d" data-show-for="%d" data-open-times="%s" data-open-dates="%s" data-uid="%s" ',
+    ' data-form-selector="%s" data-tz="%s" data-mode="%s" data-test-wait="%d" data-show-for="%d" data-open-times="%s" data-open-dates="%s" data-uid="%s" data-key-suffix="%s" ',
     esc_attr($a['form_selector']),
     esc_attr($a['tz']),
     esc_attr($a['mode']),
