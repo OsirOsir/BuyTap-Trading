@@ -1601,11 +1601,15 @@ add_shortcode('buytap_active_orders', function () {
                 <tbody>
                     <?php foreach ($orders as $order):
                         $id = $order->ID;
-                        $date_purchased = esc_html(get_post_meta($id, 'date_purchased', true));
+                        $date_purchased = get_post_meta($id, 'date_purchased', true);
+						if (empty($date_purchased)) {
+							$date_purchased = get_post_meta($id, 'order_date', true);
+						}
+						$date_purchased = esc_html($date_purchased);
                         $amount_bought = (float) get_post_meta($id, 'amount_to_send', true);
-            						if ($amount_bought <= 0) {
-            							$amount_bought = (float) get_post_meta($id, 'amount_bought', true); // fallback for Matured seller orders
-            						}
+						if ($amount_bought <= 0) {
+							$amount_bought = (float) get_post_meta($id, 'amount_bought', true); // fallback for Matured seller orders
+						}
                         $expected_return = (float) get_post_meta($id, 'expected_amount', true);
                         $time_remaining = (int)get_post_meta($id, 'time_remaining', true);
 
