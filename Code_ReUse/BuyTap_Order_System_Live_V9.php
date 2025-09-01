@@ -1910,7 +1910,6 @@ add_action('wp_footer', function () {
                 if (diff <= 0) {
                     cell.innerHTML = 'Matured';
                     clearInterval(timer);
-					setTimeout(() => window.location.reload(), 1500); // 👈 auto refresh dashboard
                     return;
                 }
 
@@ -1954,8 +1953,6 @@ add_action('wp_loaded', function () {
         // Update order status to Matured
         update_post_meta($order_id, 'status', 'Matured');
         update_post_meta($order_id, 'sub_status', 'Waiting to be Paired');
-		
-		clean_post_cache($order_id); // 👈 force refresh so front-end sees change immediately
 
 		update_post_meta($order_id, 'remaining_to_receive', (float) get_post_meta($order_id, 'expected_amount', true));
 		update_post_meta($order_id, 'is_paired', 'no');
