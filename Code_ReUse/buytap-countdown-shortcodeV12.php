@@ -12,6 +12,7 @@ add_action('init', function () {
   add_shortcode('buytap_countdown', 'buytap_countdown_shortcode');
 });
 
+
 /**
  * Shortcode: [buytap_countdown]
  *
