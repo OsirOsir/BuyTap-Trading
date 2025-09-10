@@ -259,4 +259,3 @@ add_action('admin_post_buytap_force_revoke_order', function () {
     wp_safe_redirect(add_query_arg('buytap_msg', rawurlencode('Order forcibly revoked'), admin_url('edit.php?post_type=buytap_order')));
     exit;
 });
-
